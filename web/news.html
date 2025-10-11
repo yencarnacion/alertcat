@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>More News</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="stylesheet" href="/assets/styles.css"/>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">breakwatch</div>
+    <div class="pill">News</div>
+  </header>
+
+  <main class="page">
+    <section class="panel">
+      <h2 style="margin:6px 0 10px 0;">More News</h2>
+      <div id="rangeNote" class="muted" style="font-size:13px;margin-bottom:10px;"></div>
+      <div id="newsList" class="newsGrid"></div>
+    </section>
+  </main>
+
+  <script>
+    function priorOpenDayStr(dateStr){
+      const d = new Date(dateStr + "T12:00:00Z"); // avoid TZ drift
+      const wd = d.getUTCDay(); // 0=Sun,1=Mon,...6=Sat
+      const back = (wd === 1) ? 3 : 1; // Mon→Fri, else previous weekday
+      d.setUTCDate(d.getUTCDate() - back);
+      return d.toISOString().slice(0,10);
+    }
+    function getParam(name){
+      const u = new URL(location.href);
+      return u.searchParams.get(name) || "";
+    }
+    function escapeHTML(s){return String(s||"").replace(/[&<>"'`]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','`':'&#96;'}[c]));}
+
+    (async function init(){
+      const ticker = getParam("ticker").toUpperCase();
+      const date   = getParam("date");
+      if(!ticker || !date){
+        document.getElementById('newsList').textContent = "Missing ticker or date.";
+        return;
+      }
+      const from = priorOpenDayStr(date);
+      document.getElementById('rangeNote').textContent =
+        `${ticker} — showing headlines from ${from} through ${date} (ET)`;
+
+      try{
+        const res = await fetch(`/api/extra?ticker=${encodeURIComponent(ticker)}&date=${encodeURIComponent(date)}&days=2`, {cache:'no-store'});
+        const j = await res.json();
+        const arr = Array.isArray(j?.news) ? j.news : [];
+        const box = document.getElementById('newsList');
+        if(arr.length === 0){
+          box.innerHTML = `<div class="muted">No headlines in this window.</div>`;
+          return;
+        }
+        box.innerHTML = "";
+        arr.forEach(n=>{
+          const time = n.published ? new Date(n.published).toLocaleString() : "";
+          const div = document.createElement('div');
+          div.className = "newsBig";
+          div.innerHTML = `
+            <a href="${n.url}" target="_blank" rel="noopener">
+              <span class="headline">${escapeHTML(n.title||"")}</span>
+              <span class="meta">${escapeHTML(n.source||"News")} • ${escapeHTML(time)}</span>
+            </a>`;
+          box.appendChild(div);
+        });
+      }catch(e){
+        document.getElementById('newsList').textContent = "Failed to load news.";
+      }
+    })();
+  </script>
+</body>
+</html>

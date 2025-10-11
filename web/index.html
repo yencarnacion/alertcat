@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>breakwatch</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="stylesheet" href="/assets/styles.css"/>
+  <!-- Lightweight Charts (pinned to v4 to avoid breaking API changes) -->
+  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4/dist/lightweight-charts.standalone.production.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">breakwatch</div>
+    <div id="status" class="pill">Disconnected</div>
+  </header>
+  <main class="container">
+    <section class="panel intro">
+      <div>
+        New <b>High/Low-of-Day</b> alerts <span class="muted">(times shown in ET)</span>. Newest appears on top.
+      </div>
+      <div class="controls">
+        <button id="soundBtn" class="primary">Enable sound</button>
+        <span id="soundState" class="muted">Sound OFF</span>
+      </div>
+    </section>
+    <section class="panel controls">
+      <div class="field">
+        <label for="dateInput">Date (ET)</label>
+        <input id="dateInput" type="date" />
+      </div>
+      <div class="field">
+        <span>Session</span>
+        <div class="radio-row">
+          <label><input type="radio" name="session" value="pre"> Pre-market (04:00-20:00)</label>
+          <label><input type="radio" name="session" value="rth" checked> Regular (09:30-20:00)</label>
+        </div>
+      </div>
+      <div class="field">
+        <span>Alert types</span>
+        <div class="radio-row">
+          <label><input type="checkbox" id="chkHod" checked> HOD</label>
+          <label><input type="checkbox" id="chkLod" checked> LOD</label>
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:4px;">
+          If neither is checked, alerts are paused/hidden in this tab.
+        </div>
+      </div>
+      <!-- NEW: Layout / Compact mode -->
+      <div class="field">
+        <span>Layout</span>
+        <div class="radio-row">
+          <label title="Smaller cards & denser lists for side-by-side with trading software">
+            <input type="checkbox" id="chkCompact"> Compact mode
+          </label>
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:4px;">
+          Tip: add <code>?compact=1</code> to the URL to start in compact mode. Preference is saved in this browser.
+        </div>
+      </div>
+      <!-- NEW RVOL controls -->
+      <div class="field">
+        <label for="rvolThreshold">RVOL Threshold</label>
+        <input id="rvolThreshold" type="number" step="0.1" value="2.0" min="1.0"/>
+      </div>
+      <div class="field">
+        <label for="rvolMethod">RVOL Method</label>
+        <select id="rvolMethod">
+          <option value="A">Method A (Mean)</option>
+          <option value="B">Method B (Median)</option>
+        </select>
+      </div>
+      <div class="field">
+        <span>Baseline Mode</span>
+        <div class="radio-row">
+          <label><input type="radio" name="baseline" value="single"> Single-bar</label>
+          <label><input type="radio" name="baseline" value="cumulative" checked> Cumulative</label>
+        </div>
+      </div>
+      <div class="field">
+        <span>RVOL Active</span>
+        <label><input type="checkbox" id="rvolActive" checked> Enable</label>
+      </div>
+      <div class="field">
+        <label for="bucketSize">Bucket Size</label>
+        <input id="bucketSize" type="text" value="1m" disabled/>
+      </div>
+      <label class="check">
+        <input id="silentMode" type="checkbox"/>
+        <span>Silent Mode</span>
+      </label>
+      <div class="btns">
+        <button id="btnStart" class="primary">Start</button>
+        <button id="btnStop" class="danger">Stop</button>
+        <button id="btnPause">Pause Alerts (tab)</button>
+        <button id="btnClear">Clear</button>
+        <button id="btnReloadWl" title="Reload watchlist.yaml">Reload watchlist</button>
+      </div>
+    </section>
+    <!-- Pinned alerts -->
+    <section id="pinnedWrap" class="panel pinnedWrap hidden" aria-live="polite" aria-label="Pinned alerts">
+      <div class="pinnedTop">
+        <div class="pinTitle">Pinned <span id="pinnedCount" class="count">(0)</span></div>
+        <button id="btnUnpinAll" class="linkBtn" disabled>Unpin all</button>
+      </div>
+      <div id="pinned" class="pinnedList"></div>
+    </section>
+    <!-- Live feed (newest first via column-reverse) -->
+    <section id="feed" class="feed" aria-live="polite"></section>
+    <!-- NEW: Recent Alerts list -->
+    <section id="alertsWrap" class="panel" aria-live="polite">
+      <div class="title">Recent Alerts <span id="alertsCount" class="count">(0)</span></div>
+      <table id="alertsTable">
+        <thead>
+          <tr>
+            <th>Time (ET)</th>
+            <th>Ticker</th>
+            <th>Price</th>
+            <th>Volume</th>
+            <th>Baseline</th>
+            <th>RVOL</th>
+            <th>Method</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </main>
+  <!-- Fallback audio (used if Web Audio is unavailable) -->
+  <audio id="alertAudio" src="/alert.mp3" preload="auto"></audio>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

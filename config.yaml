@@ -1,0 +1,16 @@
+server_port: 8089
+alert:
+  sound_file: "./web/sounds/hey.mp3"
+  enable_sound: true
+  cooldown_seconds: 10
+rvol:
+  default_threshold: 2.0
+  lookback_days: 14
+  bucket_size: 1m
+  default_method: "A"
+  baseline_mode: "cumulative"
+timezone: "America/New_York"
+logging:
+  level: info
+persistence:
+  state_file: "state.json"

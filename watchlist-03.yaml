@@ -1,0 +1,8 @@
+- symbol: "TSLA"
+  name: "Tesla, Inc."
+- symbol: "AAPL"
+  name: "Apple Inc."
+- symbol: "NVDA"
+  name: "NVIDIA Corporation"
+- symbol: "AMD"
+  name: "Advanced Micro Devices, Inc."
