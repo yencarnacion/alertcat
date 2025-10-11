@@ -30,7 +30,7 @@ type Trade struct {
 type AggregateMinute struct {
 	Ev  string  `json:"ev"`  // "AM"
 	Sym string  `json:"sym"`
-	V   int64   `json:"v"`   // volume
+    V   float64 `json:"v"`   // volume may be non-integer
 	O   float64 `json:"o"`
 	H   float64 `json:"h"`
 	L   float64 `json:"l"`

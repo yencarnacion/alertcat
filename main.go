@@ -324,7 +324,7 @@ func (bs *barStore) addAM(sym string, a poly.AggregateMinute, et *time.Location)
 	// use end timestamp E as the bar's minute (Polygon's AM is minute aggregate)
 	t := time.Unix(0, a.E*int64(time.Millisecond)).In(et)
 	min := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), 0, 0, et)
-	ob := oneMinBar{TsET: min, O: a.O, H: a.H, L: a.L, C: a.C, V: a.V}
+    ob := oneMinBar{TsET: min, O: a.O, H: a.H, L: a.L, C: a.C, V: int64(math.Round(a.V))}
 
 	bs.mu.Lock()
 	slice := bs.bySym[sym]
@@ -628,8 +628,10 @@ func (m *rvolManager) OnAM(sym string, a poly.AggregateMinute, lastPrice float64
 	if bucket < 0 || bucket >= 16*60 {
 		return
 	}
-	// compute current volume per mode
-	var curVol int64
+    // compute current volume per mode
+    var curVol int64
+    // AM.v may be non-integer JSON; treat as rounded shares
+    aVol := int64(math.Round(a.V))
 	session := string(m.session)
 	if strings.ToLower(m.baselineMode) == "cumulative" {
 		// sum since session open
@@ -644,17 +646,17 @@ func (m *rvolManager) OnAM(sym string, a poly.AggregateMinute, lastPrice float64
 		// We only have current-minute bar volume from polygon AM. We need cumulative up to this minute:
 		// cumu[bucket] = cumu[bucket-1] + a.V (if bucket >= startIdx)
 		prev := int64(0)
-		if bucket-1 >= startIdx {
+        if bucket-1 >= startIdx {
 			prev = cumu[bucket-1]
 		}
 		if bucket >= startIdx {
-			cumu[bucket] = prev + a.V
+            cumu[bucket] = prev + aVol
 			curVol = cumu[bucket]
 		} else {
 			curVol = 0
 		}
 	} else {
-		curVol = a.V
+        curVol = aVol
 	}
 
 	// compute RVOL

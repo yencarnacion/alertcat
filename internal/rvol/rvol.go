@@ -2,12 +2,13 @@
 package rvol
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"sort"
-	"time"
+    "context"
+    "encoding/json"
+    "fmt"
+    "math"
+    "net/http"
+    "sort"
+    "time"
 )
 
 type Method string
@@ -81,15 +82,17 @@ func Backfill(ctx context.Context, httpClient *http.Client, polygonKey, symbol s
 	if resp.StatusCode/100 != 2 {
 		return nil, fmt.Errorf("polygon aggs http %d", resp.StatusCode)
 	}
-	var payload struct {
-		Results []struct {
-			T int64 `json:"t"` // ms
-			V int64 `json:"v"`
-		} `json:"results"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
-	}
+    dec := json.NewDecoder(resp.Body)
+    dec.UseNumber() // preserve numeric tokens as-is
+    var payload struct {
+        Results []struct {
+            T int64       `json:"t"` // ms
+            V json.Number `json:"v"`
+        } `json:"results"`
+    }
+    if err := dec.Decode(&payload); err != nil {
+        return nil, err
+    }
 
     // Collect unique trading days present in results (chronological due to sort=asc).
     type key struct{ y, m, d int }
@@ -144,8 +147,18 @@ func Backfill(ctx context.Context, httpClient *http.Client, polygonKey, symbol s
 		if idx < 0 || idx >= (16*60) { // 04:00..19:59
 			continue
 		}
-		row := getSlot(idx)
-		row[pos] = r.V // missing mins remain 0
+        // Parse volume which may be integer or scientific/decimal (e.g., 9.322768e+06)
+        var vol int64
+        if v, err := r.V.Int64(); err == nil {
+            vol = v
+        } else if f, err2 := r.V.Float64(); err2 == nil {
+            vol = int64(math.Round(f))
+        } else {
+            // skip unparseable
+            continue
+        }
+        row := getSlot(idx)
+        row[pos] = vol // missing minutes remain 0
 	}
 
 	// Normalize baseline order to be oldest..newest and ensure deterministic map iteration (not required but nice)
