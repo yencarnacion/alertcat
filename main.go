@@ -1091,8 +1091,8 @@ func main() {
 			h.resetHistories()
             // IMPORTANT: HOD/LOD begins at 16:06 when PM is selected
             odStartET := startET
-            if sess == SessionPM {
-                odStartET = odStartET.Add(6 * time.Minute) // 16:06 ET
+            if sess == SessionPre || sess == SessionPM {
+                odStartET = odStartET.Add(6 * time.Minute) // 16:06 ET or 04:06 ET for pre
             }
             eng = newOdEngine(h, et, odStartET, endET, time.Now().In(et))
 			eng.setAllowed(symbols)
