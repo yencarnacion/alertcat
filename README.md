@@ -17,6 +17,8 @@
 - Open http://localhost:8089
 - Start monitoring with controls.
 - Session times: Extended (04:00 ET), Regular (09:30 ET).
+- Defaults: **Pre‑market (04:00 ET)** window, **HOD shown by default** (LOD hidden),
+  RVOL **Method B (Median)** with a **single‑bar baseline** (minute vs same minute over the last 14 trading days).
 - RVOL: Compares current minute volume to historical mean/median over 14 days.
 
 ## RVOL Explanation

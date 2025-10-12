@@ -924,7 +924,7 @@ func main() {
 	if cfg.Rvol.LookbackDays <= 0 { cfg.Rvol.LookbackDays = 14 }
 	if strings.TrimSpace(cfg.Rvol.BucketSize) == "" { cfg.Rvol.BucketSize = "1m" }
 	if strings.TrimSpace(cfg.Rvol.DefaultMethod) == "" { cfg.Rvol.DefaultMethod = "A" }
-	if strings.TrimSpace(cfg.Rvol.BaselineMode) == "" { cfg.Rvol.BaselineMode = "cumulative" }
+	if strings.TrimSpace(cfg.Rvol.BaselineMode) == "" { cfg.Rvol.BaselineMode = "single" }
 
 	var wl WatchlistFile
 	if err := loadYAML("watchlist.yaml", &wl); err != nil {

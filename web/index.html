@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <title>breakwatch</title>
+  <title>alertcat</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <link rel="stylesheet" href="/assets/styles.css"/>
   <!-- Lightweight Charts (pinned to v4 to avoid breaking API changes) -->
@@ -10,7 +10,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">breakwatch</div>
+    <div class="brand">alertcat</div>
     <div id="status" class="pill">Disconnected</div>
   </header>
   <main class="container">
@@ -31,15 +31,15 @@
       <div class="field">
         <span>Session</span>
         <div class="radio-row">
-          <label><input type="radio" name="session" value="pre"> Pre-market (04:00-20:00)</label>
-          <label><input type="radio" name="session" value="rth" checked> Regular (09:30-20:00)</label>
+          <label><input type="radio" name="session" value="pre" checked> Pre-market (04:00-20:00)</label>
+          <label><input type="radio" name="session" value="rth"> Regular (09:30-20:00)</label>
         </div>
       </div>
       <div class="field">
         <span>Alert types</span>
         <div class="radio-row">
           <label><input type="checkbox" id="chkHod" checked> HOD</label>
-          <label><input type="checkbox" id="chkLod" checked> LOD</label>
+          <label><input type="checkbox" id="chkLod"> LOD</label>
         </div>
         <div class="muted" style="font-size:12px;margin-top:4px;">
           If neither is checked, alerts are paused/hidden in this tab.
@@ -66,14 +66,14 @@
         <label for="rvolMethod">RVOL Method</label>
         <select id="rvolMethod">
           <option value="A">Method A (Mean)</option>
-          <option value="B">Method B (Median)</option>
+          <option value="B" selected>Method B (Median)</option>
         </select>
       </div>
       <div class="field">
         <span>Baseline Mode</span>
         <div class="radio-row">
-          <label><input type="radio" name="baseline" value="single"> Single-bar</label>
-          <label><input type="radio" name="baseline" value="cumulative" checked> Cumulative</label>
+          <label><input type="radio" name="baseline" value="single" checked> Single-bar</label>
+          <label><input type="radio" name="baseline" value="cumulative"> Cumulative</label>
         </div>
       </div>
       <div class="field">

@@ -7,8 +7,8 @@ rvol:
   default_threshold: 2.0
   lookback_days: 14
   bucket_size: 1m
-  default_method: "A"
-  baseline_mode: "cumulative"
+  default_method: "B"
+  baseline_mode: "single"
 timezone: "America/New_York"
 logging:
   level: info
