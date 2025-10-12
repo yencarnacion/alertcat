@@ -8,7 +8,7 @@
 - Backfills historical bars for RVOL baselines.
 
 ## Setup
-1. `cp .env.example .env` and set `POLYGON_API_KEY`.
+1. `cp env.example .env` and set `POLYGON_API_KEY`.
 2. Configure `config.yaml` and `watchlist.yaml`.
 3. `go mod tidy`
 4. `make run`

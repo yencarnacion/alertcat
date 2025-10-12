@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+        "math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -566,6 +567,11 @@ func serveStatic(mux *http.ServeMux, webDir string, soundPath string) {
         if p := strings.TrimSpace(soundPath); p != "" {
             if st, err := os.Stat(p); err == nil && !st.IsDir() {
                 w.Header().Set("Cache-Control", "public, max-age=864000")
+                // Set appropriate Content-Type when we serve a real MP3 file
+                lp := strings.ToLower(p)
+                if strings.HasSuffix(lp, ".mp3") {
+                    w.Header().Set("Content-Type", "audio/mpeg")
+                }
                 http.ServeFile(w, r, p)
                 return
             }
@@ -587,25 +593,42 @@ func (m *rvolManager) setSession(date time.Time, sess SessionType) {
 func (m *rvolManager) loadBaselines(symbols []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	wg := sync.WaitGroup{}
-	for _, s := range symbols {
-		s := s
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			b, err := rvolpkg.Backfill(ctx, m.httpClient, m.polygonKey, s, m.anchorDate, m.cfg.Rvol.LookbackDays, m.et)
-			if err != nil {
-				log.Printf("[rvol] backfill %s: %v", s, err)
-				return
-			}
-			m.mu.Lock()
-			m.baselines[s] = b
-			// reset cumulative map
-			m.cumuVolumes[s] = make(map[int]int64)
-			m.mu.Unlock()
-		}()
-	}
-	wg.Wait()
+    // Limit parallel backfills to avoid rate limits / GOAWAYs
+    maxParallel := 5
+    sem := make(chan struct{}, maxParallel)
+    wg := sync.WaitGroup{}
+    for _, s := range symbols {
+        s := s
+        wg.Add(1)
+        go func() {
+            defer wg.Done()
+            sem <- struct{}{}
+            defer func() { <-sem }()
+
+            base := time.Second
+            for attempt := 0; attempt < 3; attempt++ {
+                b, err := rvolpkg.Backfill(ctx, m.httpClient, m.polygonKey, s, m.anchorDate, m.cfg.Rvol.LookbackDays, m.et)
+                if err != nil {
+                    if ctx.Err() != nil { return }
+                    if attempt == 2 {
+                        log.Printf("[rvol] backfill %s failed after retries: %v", s, err)
+                        return
+                    }
+                    sleep := base * (1 << attempt)
+                    jitter := time.Duration(rand.Int63n(int64(250 * time.Millisecond)))
+                    time.Sleep(sleep + jitter)
+                    continue
+                }
+                m.mu.Lock()
+                m.baselines[s] = b
+                // reset cumulative map
+                m.cumuVolumes[s] = make(map[int]int64)
+                m.mu.Unlock()
+                return
+            }
+        }()
+    }
+    wg.Wait()
 }
 func (m *rvolManager) resetCooldowns() {
 	m.mu.Lock()
@@ -834,7 +857,7 @@ func fetchSecFilings(secKey, ticker, dateStr string) []SecFiling {
 	if secKey == "" { return nil }
 	body := map[string]any{
 		"query": fmt.Sprintf("ticker:%s AND filedAt:[%s TO %s]", ticker, dateStr, dateStr),
-		"from":  "0", "size": "50",
+        "from":  0, "size": 50,
 		"sort":  []map[string]map[string]string{{"filedAt": {"order": "desc"}}},
 	}
     b, _ := json.Marshal(body)
@@ -1143,8 +1166,14 @@ func main() {
 		if m, err := strconv.Atoi(minsStr); err == nil && m > 0 && m <= 720 {
 			windowMin = m
 		}
-		atUnix, _ := strconv.ParseInt(atms, 10, 64)
-		atET := time.Unix(0, atUnix*int64(time.Millisecond)).In(et)
+		atUnix, err := strconv.ParseInt(atms, 10, 64)
+		var atET time.Time
+		if err != nil || atUnix <= 0 {
+			// Fall back to "now" in ET for robustness
+			atET = time.Now().In(et)
+		} else {
+			atET = time.Unix(0, atUnix*int64(time.Millisecond)).In(et)
+		}
 
 		// get slices
 		bars.mu.RLock()
