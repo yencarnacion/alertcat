@@ -46,12 +46,15 @@ func MinuteIndexFrom0400ET(t time.Time, et *time.Location) int {
 
 // SessionStartIndex computes the minute index at which the session opens (pre or rth) for "day".
 func SessionStartIndex(session string, et *time.Location, day time.Time) int {
-	day = day.In(et)
-	h, m := 4, 0
-	if session == "rth" {
-		h, m = 9, 30
-	}
-	base := time.Date(day.Year(), day.Month(), day.Day(), h, m, 0, 0, et)
+    day = day.In(et)
+    h, m := 4, 0
+    s := stringsLower(session)
+    if s == "rth" {
+        h, m = 9, 30
+    } else if s == "pm" {
+        h, m = 16, 0
+    }
+    base := time.Date(day.Year(), day.Month(), day.Day(), h, m, 0, 0, et)
     return MinuteIndexFrom0400ET(base, et)
 }
 

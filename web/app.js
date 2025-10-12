@@ -567,7 +567,8 @@ async function initStatus() {
       sessionDateET = todayISO();
     }
     if (j?.running) {
-      const label = j.session === "pre" ? "Pre-market" : "RTH";
+      const map = { pre: "Pre-market", rth: "RTH", pm: "PM" };
+      const label = map[j.session] || (j.session ? j.session.toUpperCase() : "Session");
       const suffix = j.startET ? ` from ${j.startET} to ${j.endET} ET` : "";
       setStatus(`${label} running on ${j.date}${suffix}`, true);
     } else {

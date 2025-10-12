@@ -94,17 +94,21 @@ type SessionType string
 const (
 	SessionPre SessionType = "pre" // 04:00–20:00
 	SessionRTH SessionType = "rth" // 09:30–20:00
+    SessionPM  SessionType = "pm"  // 16:00–20:00
 )
 
 func sessionBounds(et *time.Location, date time.Time, sess SessionType) (startET, endET time.Time) {
-	y, m, d := date.In(et).Date()
-	startH, startM := 4, 0
-	if sess == SessionRTH {
-		startH, startM = 9, 30
-	}
-	startET = time.Date(y, m, d, startH, startM, 0, 0, et)
-	endET = time.Date(y, m, d, 20, 0, 0, 0, et)
-	return
+    y, m, d := date.In(et).Date()
+    startH, startM := 4, 0
+    switch sess {
+    case SessionRTH:
+        startH, startM = 9, 30
+    case SessionPM:
+        startH, startM = 16, 0
+    }
+    startET = time.Date(y, m, d, startH, startM, 0, 0, et)
+    endET = time.Date(y, m, d, 20, 0, 0, 0, et)
+    return
 }
 
 func etClock(ts time.Time) string { return ts.Format("15:04:05") + " ET" }
@@ -1072,13 +1076,25 @@ func main() {
 				t, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(req.Date), et)
 				if err == nil { dt = t }
 			}
-			sess := SessionRTH
-			if strings.ToLower(strings.TrimSpace(req.Session)) == "pre" { sess = SessionPre }
+            var sess SessionType
+            switch strings.ToLower(strings.TrimSpace(req.Session)) {
+            case "pre":
+                sess = SessionPre
+            case "pm":
+                sess = SessionPM
+            default:
+                sess = SessionRTH
+            }
 			startET, endET := sessionBounds(et, dt, sess)
 			// reset stores
 			bars.reset()
 			h.resetHistories()
-			eng = newOdEngine(h, et, startET, endET, time.Now().In(et))
+            // IMPORTANT: HOD/LOD begins at 16:06 when PM is selected
+            odStartET := startET
+            if sess == SessionPM {
+                odStartET = odStartET.Add(6 * time.Minute) // 16:06 ET
+            }
+            eng = newOdEngine(h, et, odStartET, endET, time.Now().In(et))
 			eng.setAllowed(symbols)
 
 			// RVOL
@@ -1101,7 +1117,7 @@ func main() {
 					log.Printf("[polygon] broker stopped: %v", err)
 				}
 			}()
-			label := map[SessionType]string{SessionPre:"Pre‑market", SessionRTH:"RTH"}[sess]
+            label := map[SessionType]string{SessionPre:"Pre‑market", SessionRTH:"RTH", SessionPM:"PM"}[sess]
 			h.broadcast(statusMsg{Type:"status", Level:"success", Text:fmt.Sprintf("%s started (%s–%s ET)", label, startET.Format("15:04"), endET.Format("15:04"))})
 			_ = json.NewEncoder(w).Encode(streamResp{OK:true, Status:"Stream starting"})
 		default:

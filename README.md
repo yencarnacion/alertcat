@@ -16,7 +16,8 @@
 ## Usage
 - Open http://localhost:8089
 - Start monitoring with controls.
-- Session times: Extended (04:00 ET), Regular (09:30 ET).
+- Session times: Pre‑market (04:00 ET), Regular (09:30 ET), **PM (16:00 ET)**.
+- For PM: **HOD/LOD start at 16:06 ET** (first 6 minutes ignored for HOD/LOD calculations).
 - Defaults: **Pre‑market (04:00 ET)** window, **HOD shown by default** (LOD hidden),
   RVOL **Method B (Median)** with a **single‑bar baseline** (minute vs same minute over the last 14 trading days).
 - RVOL: Compares current minute volume to historical mean/median over 14 days.
