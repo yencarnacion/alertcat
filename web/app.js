@@ -1,5 +1,6 @@
 const statusPill = document.getElementById("status");
 const feed = document.getElementById("feed");
+const liveFeed = document.getElementById("live"); // NEW: right column live stream
 const soundBtn = document.getElementById("soundBtn");
 const soundState = document.getElementById("soundState");
 const fallbackAudio = document.getElementById("alertAudio");
@@ -258,11 +259,60 @@ function renderFeed() {
   });
   feed.appendChild(frag);
 }
+
+/* ============ RIGHT: Live stream ============ */
+let liveMaxItems = 6; // will be recomputed after first render
+function trimLive() {
+  if (!liveFeed) return;
+  while (liveFeed.children.length > liveMaxItems) {
+    liveFeed.removeChild(liveFeed.lastElementChild);
+  }
+}
+function recomputeLiveCapacity() {
+  if (!liveFeed) return;
+  // Make sure the container has a precise height that fits the viewport.
+  const boxTop = liveFeed.getBoundingClientRect().top;
+  const target = Math.max(120, Math.floor(window.innerHeight - boxTop - 12));
+  liveFeed.style.height = target + "px";
+
+  // Estimate card height (including the vertical gap).
+  let sample = liveFeed.querySelector(".card") || feed?.querySelector?.(".card");
+  let gap = 8;
+  try {
+    const cs = getComputedStyle(liveFeed);
+    gap = parseInt(cs.rowGap || cs.gap || "8", 10) || 8;
+  } catch {}
+  const cardH = sample ? Math.ceil(sample.getBoundingClientRect().height) + gap : 160;
+  liveMaxItems = Math.max(1, Math.floor(target / cardH));
+  trimLive();
+}
+function seedLiveFromHistory() {
+  if (!liveFeed) return;
+  liveFeed.innerHTML = "";
+  // take last N alerts (newest last in allAlerts) so we can prepend in correct order
+  const take = Math.min(liveMaxItems, allAlerts.length);
+  for (let i = allAlerts.length - take; i < allAlerts.length; i++) {
+    const a = allAlerts[i];
+    if (!a) continue;
+    if (!shouldShow(a.kind) || isPinnedId(alertId(a))) continue;
+    const node = buildAlertCard(a, false, false);
+    liveFeed.prepend(node); // newest ends up at top
+  }
+  trimLive();
+}
+function addLiveCard(a) {
+  if (!liveFeed) return;
+  const node = buildAlertCard(a, false, false);
+  liveFeed.prepend(node); // newest to top
+  trimLive();
+}
 function renderAll(){
   // Destroy all charts (both pinned + feed will fully re-render)
   for (const id of Array.from(chartsById.keys())) destroyChart(id);
   renderPinned();
   renderFeed();
+  recomputeLiveCapacity();
+  seedLiveFromHistory();
 }
 function addIncomingAlert(a){
   allAlerts.push(a);
@@ -272,6 +322,7 @@ function addIncomingAlert(a){
     const node = buildAlertCard(a, autoChart, false);
     feed.appendChild(node);
     playSound();
+    addLiveCard(a); // mirror to the live stream on the right
   } else {
     // muted by filter or pinned; still play sound for pinned
     if (isPinnedId(alertId(a))) playSound();
@@ -279,6 +330,7 @@ function addIncomingAlert(a){
 }
 // NEW: Render recent RVOL alerts
 function renderRecentAlerts() {
+  if (!alertsTableBody || !alertsCount) return;
   alertsTableBody.innerHTML = "";
   const frag = document.createDocumentFragment();
   recentAlerts.slice().reverse().forEach(a => { // newest first
@@ -720,6 +772,10 @@ function initCompact(){
   });
   connectWS();
   initStatus().then(() => {});
+  // Keep live pane sized correctly
+  window.addEventListener("resize", () => {
+    recomputeLiveCapacity();
+  });
 })();
 
 function stopAllSounds() {

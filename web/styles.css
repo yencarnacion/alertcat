@@ -24,6 +24,7 @@ body{
   background:var(--bg);
   color:var(--text);
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  font-size: 12px; /* smaller default so 100% zoom ≈ compact view */
 }
 .topbar{
   display:flex; align-items:center; justify-content:space-between;
@@ -31,9 +32,9 @@ body{
 }
 .brand{ font-weight:800; letter-spacing:.3px; }
 .brand .muted{ color: var(--muted); font-weight:600; }
-.pill{ padding:6px 10px; border-radius:999px; background:var(--pill); font-size:12px; }
+.pill{ padding:5px 8px; border-radius:999px; background:var(--pill); font-size:11px; }
 .pill.ok{ background:var(--pill-on); color:#fff; }
-.container{ max-width: 1080px; margin: 16px auto; padding: 0 14px; }
+.container{ max-width: none; margin: 16px 12px; padding: 0; }
 .panel{
   background:var(--panel); border:1px solid #1c1f25; border-radius:10px;
   padding:12px;
@@ -60,6 +61,25 @@ button:hover{ filter:brightness(1.06); }
   max-height: 70vh;
   overflow:auto;
 }
+
+/* ===== Split (two-column) layout ===== */
+.split{
+  display:grid;
+  grid-template-columns: 1fr 1fr;  /* left and right each take 50% */
+  gap:12px;
+  align-items:start;
+  margin-top: 12px;
+}
+.col{ min-width: 0; }
+.leftCol{ }
+.rightCol{ position: relative; }
+
+/* Right column live stream (no scroll, auto trimmed by JS) */
+.liveFeed{
+  display:flex; flex-direction:column; gap:8px;
+  overflow:hidden;  /* do not scroll – we trim in JS */
+  height: 60vh;     /* JS will set an exact height after layout */
+}
 /* Pinned section */
 .pinnedWrap{ margin-top:14px; }
 .pinnedTop{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
@@ -84,14 +104,14 @@ button:hover{ filter:brightness(1.06); }
 .card.isPinned{ border-color: var(--yellow); box-shadow: 0 0 0 1px rgba(255, 204, 0, 0.25) inset; }
 .left{ grid-area:left; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
 .badge{ background:#2a2f3a; color:#cbd5e1; padding:4px 8px; border-radius:6px; font-size:12px; }
-.sym{ font-weight:800; font-size:18px; letter-spacing:.2px; }
-.name{ color:var(--muted); font-size:13px; max-width: 44ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.price{ grid-area:price; font-variant-numeric: tabular-nums; font-weight:800; font-size:18px; }
-.time{ grid-area:time; color:var(--muted); font-variant-numeric: tabular-nums; min-width: 84px; text-align:right; }
+.sym{ font-weight:800; font-size:16px; letter-spacing:.2px; }
+.name{ color:var(--muted); font-size:12px; max-width: 44ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.price{ grid-area:price; font-variant-numeric: tabular-nums; font-weight:800; font-size:16px; }
+.time{ grid-area:time; color:var(--muted); font-variant-numeric: tabular-nums; min-width: 80px; text-align:right; font-size:12px; }
 .chartRow{ grid-area:chart; display:flex; align-items:center; gap:12px; }
 .chartBox{
-  width: 150px; /* ~1.5 inches on 96dpi */
-  height: 150px; /* ~1.5 inches on 96dpi */
+  width: 120px;
+  height: 120px;
   border:1px solid #1f2430; border-radius:8px; overflow:hidden;
   background:#0e1117;
 }
@@ -129,7 +149,7 @@ button:hover{ filter:brightness(1.06); }
   padding:10px;
 }
 .sectionTitle{
-  font-weight:700; font-size:13px; letter-spacing:.2px; color:#d6d9e0;
+  font-weight:700; font-size:12px; letter-spacing:.2px; color:#d6d9e0;
   margin-bottom:6px;
 }
 .newsList, .secList{
@@ -145,13 +165,13 @@ button:hover{ filter:brightness(1.06); }
 }
 .newsItem a:hover, .secItem a:hover{ background:#171c2a; }
 .headline{
-  display:block; color:var(--headline); font-size:13px; line-height:1.25;
+  display:block; color:var(--headline); font-size:12px; line-height:1.25;
 }
 .meta{
-  display:block; color:var(--meta); font-size:11px; margin-top:3px;
+  display:block; color:var(--meta); font-size:10px; margin-top:3px;
 }
 .moreLink{
-  display:inline-block; margin-top:8px; font-size:12px; color:var(--link);
+  display:inline-block; margin-top:8px; font-size:11px; color:var(--link);
   text-decoration:none;
 }
 .moreLink:hover{ color:var(--link-hover); text-decoration:underline; }

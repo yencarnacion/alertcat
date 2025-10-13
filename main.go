@@ -23,6 +23,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
+	polygonrest "github.com/polygon-io/client-go/rest"
+	rmodels "github.com/polygon-io/client-go/rest/models"
 	"gopkg.in/yaml.v3"
 
 	"alertcat/internal/alerts"
@@ -489,6 +491,31 @@ func (e *odEngine) trade(sym string, price float64, tsET time.Time) {
 	}
 }
 
+// seedHiLo seeds a symbol's session LOD/HOD without emitting any alert.
+// It also sets AlertedLow/AlertedHigh so the next alert only fires on a true breakout above/below the seeded values.
+func (e *odEngine) seedHiLo(sym, name string, lod, hod float64) {
+    e.mu.Lock()
+    defer e.mu.Unlock()
+    if _, ok := e.allowed[sym]; !ok { return }
+    st := e.bySymbol[sym]
+    if st == nil {
+        st = &instrumentState{Symbol: sym, LOD: math.Inf(1), HOD: math.Inf(-1)}
+        e.bySymbol[sym] = st
+    }
+    if name != "" && st.Name == "" {
+        st.Name = name
+    }
+    // Only apply when we have real values
+    if !math.IsInf(lod, 1) && lod > 0 {
+        st.LOD = lod
+        st.AlertedLow = lod
+    }
+    if !math.IsInf(hod, -1) && hod > 0 {
+        st.HOD = hod
+        st.AlertedHigh = hod
+    }
+}
+
 /* ====================
    RVOL manager
    ==================== */
@@ -898,6 +925,90 @@ func strField(m map[string]any, k string) string {
 }
 
 /* ====================
+   HOD/LOD seeding (session-anchored)
+   ==================== */
+
+// seedSessionHiLo fetches today's 1-minute aggregates from Polygon REST between sessStartET and nowET (bounded by sessEndET)
+// and initializes each symbol's HOD/LOD to max(High) / min(Low) over that window, without emitting alerts.
+func seedSessionHiLo(et *time.Location, polygonKey string, symbols []string, names map[string]string, sessStartET, nowET, sessEndET time.Time, eng *odEngine) {
+    // Bound "to" inside the session and ensure window is valid
+    if nowET.After(sessEndET) {
+        nowET = sessEndET
+    }
+    if !sessStartET.Before(nowET) {
+        // Nothing to seed (e.g., starting before the session anchor)
+        return
+    }
+    ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+    defer cancel()
+
+    rest := polygonrest.NewWithClient(polygonKey, httpClient)
+
+    maxParallel := 5
+    sem := make(chan struct{}, maxParallel)
+    wg := sync.WaitGroup{}
+
+    for _, sym := range symbols {
+        s := sym
+        wg.Add(1)
+        go func() {
+            defer wg.Done()
+            sem <- struct{}{}
+            defer func() { <-sem }()
+
+            params := &rmodels.ListAggsParams{
+                Ticker:     s,
+                Timespan:   rmodels.Minute,
+                Multiplier: 1,
+                From:       rmodels.Millis(sessStartET),
+                // Polygon's REST uses an exclusive upper bound; add 1 minute to include the current minute bar if present.
+                To: rmodels.Millis(nowET.Add(1 * time.Minute)),
+            }
+            lim := 50000
+            asc := rmodels.Asc
+            adj := true
+            params.Limit = &lim
+            params.Order = &asc
+            params.Adjusted = &adj
+
+            iter := rest.ListAggs(ctx, params)
+            minLow := math.Inf(1)
+            maxHigh := math.Inf(-1)
+            for iter.Next() {
+                a := iter.Item() // models.Agg
+                // Guard window (paranoia): restrict to [sessStartET, sessEndET]
+                ts := time.Time(a.Timestamp).In(et)
+                if ts.Before(sessStartET) || ts.After(sessEndET) {
+                    continue
+                }
+                if a.Low < minLow {
+                    minLow = a.Low
+                }
+                if a.High > maxHigh {
+                    maxHigh = a.High
+                }
+            }
+            if err := iter.Err(); err != nil {
+                log.Printf("[seed H/L] %s: %v", s, err)
+                return
+            }
+            // Only seed if we actually saw data in this window
+            if !math.IsInf(minLow, 1) || !math.IsInf(maxHigh, -1) {
+                // If only one side exists, mirror to avoid zero values
+                if math.IsInf(minLow, 1) {
+                    minLow = maxHigh
+                }
+                if math.IsInf(maxHigh, -1) {
+                    maxHigh = minLow
+                }
+                eng.seedHiLo(s, names[s], minLow, maxHigh)
+            }
+        }()
+    }
+    wg.Wait()
+}
+
+/* ====================
    main
    ==================== */
 
@@ -1096,6 +1207,10 @@ func main() {
             }
             eng = newOdEngine(h, et, odStartET, endET, time.Now().In(et))
 			eng.setAllowed(symbols)
+
+			// Seed HOD/LOD from session start (04:06/09:30/16:06 ET) up to now so alerts reflect the true session range,
+			// not "since program start".
+			seedSessionHiLo(et, polygonKey, symbols, nameBySymbol, odStartET, time.Now().In(et), endET, eng)
 
 			// RVOL
 			rvm.setSession(dt, sess)

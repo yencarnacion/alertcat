@@ -98,33 +98,48 @@
         <button id="btnReloadWl" title="Reload watchlist.yaml">Reload watchlist</button>
       </div>
     </section>
-    <!-- Pinned alerts -->
-    <section id="pinnedWrap" class="panel pinnedWrap hidden" aria-live="polite" aria-label="Pinned alerts">
-      <div class="pinnedTop">
-        <div class="pinTitle">Pinned <span id="pinnedCount" class="count">(0)</span></div>
-        <button id="btnUnpinAll" class="linkBtn" disabled>Unpin all</button>
+    <!-- ===== Split layout: LEFT (history you can scroll/pin) • RIGHT (live stream) ===== -->
+    <section class="split">
+      <!-- LEFT: pinned + historical feed (scrollable), max 50% width -->
+      <div class="col leftCol">
+        <!-- Pinned alerts -->
+        <section id="pinnedWrap" class="panel pinnedWrap hidden" aria-live="polite" aria-label="Pinned alerts">
+          <div class="pinnedTop">
+            <div class="pinTitle">Pinned <span id="pinnedCount" class="count">(0)</span></div>
+            <button id="btnUnpinAll" class="linkBtn" disabled>Unpin all</button>
+          </div>
+          <div id="pinned" class="pinnedList"></div>
+        </section>
+        <!-- Historical feed (newest first via column-reverse) -->
+        <section id="feed" class="feed" aria-live="polite"></section>
       </div>
-      <div id="pinned" class="pinnedList"></div>
-    </section>
-    <!-- Live feed (newest first via column-reverse) -->
-    <section id="feed" class="feed" aria-live="polite"></section>
-    <!-- NEW: Recent Alerts list -->
-    <section id="alertsWrap" class="panel" aria-live="polite">
-      <div class="title">Recent Alerts <span id="alertsCount" class="count">(0)</span></div>
-      <table id="alertsTable">
-        <thead>
-          <tr>
-            <th>Time (ET)</th>
-            <th>Ticker</th>
-            <th>Price</th>
-            <th>Volume</th>
-            <th>Baseline</th>
-            <th>RVOL</th>
-            <th>Method</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+
+      <!-- RIGHT: Live, auto-trimming, newest-at-top, no scroll -->
+      <div class="col rightCol">
+        <section id="liveWrap" class="panel">
+          <div class="title">Live Alerts</div>
+          <div id="live" class="liveFeed" aria-live="polite"></div>
+        </section>
+
+        <!-- Keep the RVOL table (optional reference) below the live stream -->
+        <section id="alertsWrap" class="panel" aria-live="polite">
+          <div class="title">Recent RVOL Alerts <span id="alertsCount" class="count">(0)</span></div>
+          <table id="alertsTable">
+            <thead>
+              <tr>
+                <th>Time (ET)</th>
+                <th>Ticker</th>
+                <th>Price</th>
+                <th>Volume</th>
+                <th>Baseline</th>
+                <th>RVOL</th>
+                <th>Method</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </section>
+      </div>
     </section>
   </main>
   <!-- Fallback audio (used if Web Audio is unavailable) -->
