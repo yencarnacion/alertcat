@@ -149,6 +149,7 @@ type rvolAlertMsg struct {
 	Baseline float64 `json:"baseline"`
 	RVOL     float64 `json:"rvol"`
 	Method   string  `json:"method"`
+    Delta    float64 `json:"delta,omitempty"` // NEW
 }
 
 type rvolHistoryMsg struct {
@@ -526,6 +527,7 @@ type rvolManager struct {
 	et          *time.Location
 	polygonKey  string
 	httpClient  *http.Client
+    rest        *polygonrest.Client
 	threshold   float64
 	method      rvolpkg.Method
 	baselineMode string // "cumulative" or "single"
@@ -533,8 +535,9 @@ type rvolManager struct {
 	cooldownSec int
 
 	// per symbol
-	baselines   map[string]rvolpkg.Baselines
-	lastMinute  map[string]time.Time    // last bar minute
+    baselines   map[string]rvolpkg.Baselines
+    lastMinute  map[string]time.Time    // last bar minute
+    lastClose   map[string]float64      // last minute's close for delta
 	cumuVolumes map[string]map[int]int64 // per day minute cumulative map (session-based)
 	lastAlertAt map[string]time.Time
 	session     SessionType
@@ -549,7 +552,8 @@ func newRvolManager(cfg AppConfig, et *time.Location, polygonKey string, h *hub)
 		cfg:          cfg,
 		et:           et,
 		polygonKey:   polygonKey,
-		httpClient:   &http.Client{Timeout: 10 * time.Second},
+        httpClient:   &http.Client{Timeout: 10 * time.Second},
+        rest:         polygonrest.NewWithClient(polygonKey, &http.Client{Timeout: 10 * time.Second}),
 		threshold:    cfg.Rvol.DefaultThreshold,
 		method:       rvolpkg.Method(strings.ToUpper(strings.TrimSpace(cfg.Rvol.DefaultMethod))),
 		baselineMode: strings.ToLower(strings.TrimSpace(cfg.Rvol.BaselineMode)),
@@ -557,6 +561,7 @@ func newRvolManager(cfg AppConfig, et *time.Location, polygonKey string, h *hub)
 		cooldownSec:  maxInt(1, cfg.Alert.CooldownSeconds),
 		baselines:    make(map[string]rvolpkg.Baselines),
 		lastMinute:   make(map[string]time.Time),
+        lastClose:    make(map[string]float64),
 		cumuVolumes:  make(map[string]map[int]int64),
 		lastAlertAt:  make(map[string]time.Time),
 		h:            h,
@@ -565,6 +570,45 @@ func newRvolManager(cfg AppConfig, et *time.Location, polygonKey string, h *hub)
 		m.method = rvolpkg.MethodA
 	}
 	return m
+}
+
+// fetchPrevClose queries Polygon for the previous minute bar's close when we don't have it cached.
+func (m *rvolManager) fetchPrevClose(sym string, currStartET time.Time) (float64, bool) {
+    if m.rest == nil {
+        return 0, false
+    }
+    prevStart := currStartET.Add(-1 * time.Minute)
+
+    params := &rmodels.ListAggsParams{
+        Ticker:     sym,
+        Timespan:   rmodels.Minute,
+        Multiplier: 1,
+        From:       rmodels.Millis(prevStart),
+        // REST 'To' is exclusive; use currStart to include exactly the previous minute bar.
+        To: rmodels.Millis(currStartET),
+    }
+    lim := 2
+    asc := rmodels.Asc
+    adj := true
+    params.Limit = &lim
+    params.Order = &asc
+    params.Adjusted = &adj
+
+    ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+    defer cancel()
+
+    iter := m.rest.ListAggs(ctx, params)
+    var lastClose float64
+    found := false
+    for iter.Next() {
+        a := iter.Item()
+        lastClose = a.Close
+        found = true
+    }
+    if err := iter.Err(); err != nil {
+        return 0, false
+    }
+    return lastClose, found
 }
 
 // maxInt returns the maximum of a and b.
@@ -667,87 +711,133 @@ func (m *rvolManager) resetCooldowns() {
 	m.mu.Unlock()
 }
 func (m *rvolManager) OnAM(sym string, a poly.AggregateMinute, lastPrice float64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if !m.active {
-		return
-	}
-	bl := m.baselines[sym]
-	if bl == nil {
-		return
-	}
-    t := time.Unix(0, a.E*int64(time.Millisecond)).In(m.et)
-    // identify minute bucket anchored at 04:00 ET
-    bucket := rvolpkg.MinuteIndexFrom0400ET(t, m.et)
-	if bucket < 0 || bucket >= 16*60 {
-		return
-	}
-    // compute current volume per mode
-    var curVol int64
-    // AM.v may be non-integer JSON; treat as rounded shares
-    aVol := int64(math.Round(a.V))
-	session := string(m.session)
-	if strings.ToLower(m.baselineMode) == "cumulative" {
-		// sum since session open
-		startIdx := rvolpkg.SessionStartIndex(session, m.et, t)
-		// update cumulative map for today
-		cumu := m.cumuVolumes[sym]
-		if cumu == nil {
-			cumu = make(map[int]int64)
-			m.cumuVolumes[sym] = cumu
-		}
-		// today's minute index => cumulative sum
-		// We only have current-minute bar volume from polygon AM. We need cumulative up to this minute:
-		// cumu[bucket] = cumu[bucket-1] + a.V (if bucket >= startIdx)
-		prev := int64(0)
-        if bucket-1 >= startIdx {
-			prev = cumu[bucket-1]
-		}
-		if bucket >= startIdx {
-            cumu[bucket] = prev + aVol
-			curVol = cumu[bucket]
-		} else {
-			curVol = 0
-		}
-	} else {
-        curVol = aVol
-	}
+    // We intentionally use the Polygon 1‑minute candle close for both the displayed price
+    // and the delta calculation (current close − prior minute close). The last trade price
+    // is not used here; keep the parameter for existing call sites.
+    _ = lastPrice
+    // Phase 1: compute RVOL & capture state under lock
+    m.mu.Lock()
+    if !m.active {
+        m.mu.Unlock()
+        return
+    }
+    bl := m.baselines[sym]
+    if bl == nil {
+        m.mu.Unlock()
+        return
+    }
 
-	// compute RVOL
-	rv, baseline := rvolpkg.ComputeRVOL(bl, bucket, curVol, m.method, m.baselineMode, session, m.et)
-	if rv <= 0 {
-		return
-	}
-	// threshold + cooldown
-	if rv >= m.threshold {
-		la := m.lastAlertAt[sym]
-		if time.Since(la) >= time.Duration(m.cooldownSec)*time.Second {
-			m.lastAlertAt[sym] = time.Now()
-			msg := rvolAlertMsg{
-				Type:     "rvol_alert",
-				Time:     etClock(t),
-				Sym:      sym,
-				Price:    lastPrice,
-				Volume:   curVol,
-				Baseline: baseline,
-				RVOL:     rv,
-				Method:   string(m.method),
-			}
-			m.h.addRvolHistory(msg)
-			m.h.broadcast(msg)
-			_ = alerts.LogToCSV(alerts.Alert{
-				Timestamp: time.Now(),
-				Symbol:    sym,
-				Price:     lastPrice,
-				Volume:    curVol,
-				Baseline:  baseline,
-				RVOL:      rv,
-				Method:    string(m.method),
-				Bucket:    fmt.Sprintf("%02d:%02d", t.Hour(), t.Minute()),
-				Threshold: m.threshold,
-			})
-		}
-	}
+    t := time.Unix(0, a.E*int64(time.Millisecond)).In(m.et)  // current bar end (minute)
+    currStart := time.Unix(0, a.S*int64(time.Millisecond)).In(m.et)
+
+    // bucket since 04:00 ET
+    bucket := rvolpkg.MinuteIndexFrom0400ET(t, m.et)
+    if bucket < 0 || bucket >= 16*60 {
+        m.mu.Unlock()
+        return
+    }
+
+    // Current volume (single vs cumulative)
+    var curVol int64
+    aVol := int64(math.Round(a.V))
+    session := string(m.session)
+    if strings.ToLower(m.baselineMode) == "cumulative" {
+        startIdx := rvolpkg.SessionStartIndex(session, m.et, t)
+        cumu := m.cumuVolumes[sym]
+        if cumu == nil {
+            cumu = make(map[int]int64)
+            m.cumuVolumes[sym] = cumu
+        }
+        prev := int64(0)
+        if bucket-1 >= startIdx {
+            prev = cumu[bucket-1]
+        }
+        if bucket >= startIdx {
+            cumu[bucket] = prev + aVol
+            curVol = cumu[bucket]
+        } else {
+            curVol = 0
+        }
+    } else {
+        curVol = aVol
+    }
+
+    rv, baseline := rvolpkg.ComputeRVOL(bl, bucket, curVol, m.method, m.baselineMode, session, m.et)
+    if rv <= 0 {
+        m.mu.Unlock()
+        return
+    }
+
+    // Threshold/cooldown
+    shouldAlert := false
+    if rv >= m.threshold {
+        la := m.lastAlertAt[sym]
+        if time.Since(la) >= time.Duration(m.cooldownSec)*time.Second {
+            shouldAlert = true
+        }
+    }
+
+    // Try to use cached previous minute close when it's exactly t-1m
+    prevClose, havePrev := m.lastClose[sym]
+    prevMin := m.lastMinute[sym]
+    cachedIsPrev := havePrev && prevMin.Equal(t.Add(-1*time.Minute))
+
+    // Update caches for this bar for next minute
+    m.lastMinute[sym] = t
+    m.lastClose[sym] = a.C
+    meth := string(m.method)
+    threshold := m.threshold
+    m.mu.Unlock()
+
+    if !shouldAlert {
+        return
+    }
+
+    // Phase 2: fetch previous minute close if needed (outside lock)
+    if !cachedIsPrev {
+        if c, ok := m.fetchPrevClose(sym, currStart); ok {
+            prevClose = c
+            havePrev = true
+        }
+    }
+
+    // Price and delta strictly from Polygon 1‑minute bars.
+    price := a.C
+    delta := 0.0
+    if havePrev && prevClose > 0 {
+        delta = price - prevClose
+    }
+
+    // Phase 3: finalize (update cooldown, broadcast, log)
+    m.mu.Lock()
+    m.lastAlertAt[sym] = time.Now()
+    m.mu.Unlock()
+
+    msg := rvolAlertMsg{
+        Type:     "rvol_alert",
+        Time:     etClock(t),
+        Sym:      sym,
+        Price:    price,
+        Volume:   curVol,
+        Baseline: baseline,
+        RVOL:     rv,
+        Method:   meth,
+        Delta:    delta, // NEW
+    }
+    m.h.addRvolHistory(msg)
+    m.h.broadcast(msg)
+
+    _ = alerts.LogToCSV(alerts.Alert{
+        Timestamp: time.Now(),
+        Symbol:    sym,
+        Price:     price,
+        Volume:    curVol,
+        Baseline:  baseline,
+        RVOL:      rv,
+        Method:    meth,
+        Bucket:    fmt.Sprintf("%02d:%02d", t.Hour(), t.Minute()),
+        Threshold: threshold,
+    })
 }
 
 /* ====================

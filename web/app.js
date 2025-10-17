@@ -425,10 +425,18 @@ function renderRecentAlerts() {
       tr.className = `${gIdx % 2 === 0 ? "groupEven" : "groupOdd"} ${i === 0 ? "minuteStart" : ""}`;
       tr.setAttribute("data-minute", minuteStr);
 
+      const priceTxt = `$${Number(a.price).toFixed(2)}`;
+      let deltaHTML = "";
+      if (typeof a.delta === "number" && !Number.isNaN(a.delta) && a.delta !== 0) {
+        const sign = a.delta > 0 ? "+" : "-";
+        const cls  = a.delta > 0 ? "pos" : "neg";
+        deltaHTML = ` <span class="delta ${cls}">(${sign}${Math.abs(a.delta).toFixed(2)})</span>`;
+      }
+
       tr.innerHTML = `
         <td>${minuteStr}</td>
         <td>${a.symbol}</td>
-        <td>$${Number(a.price).toFixed(2)}</td>
+        <td>${priceTxt}${deltaHTML}</td>
         <td>${a.volume}</td>
         <td>${Number(a.baseline).toFixed(0)}</td>
         <td>${Number(a.rvol).toFixed(2)}</td>
@@ -460,7 +468,8 @@ function addRvolAlert(msg) {
     volume: msg.volume,
     baseline: msg.baseline,
     rvol: msg.rvol,
-    method: msg.method
+    method: msg.method,
+    delta: (typeof msg.delta === "number" ? msg.delta : null) // NEW
   });
   if (recentAlerts.length > 200) recentAlerts.shift();
   renderRecentAlerts();
@@ -749,7 +758,8 @@ function connectWS() {
           volume: a.volume,
           baseline: a.baseline,
           rvol: a.rvol,
-          method: a.method
+          method: a.method,
+          delta: typeof a.delta === "number" ? a.delta : null // NEW
         }));
         renderRecentAlerts();
         return;

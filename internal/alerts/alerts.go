@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
+    "path/filepath"
 	"time"
 )
 
@@ -20,9 +21,15 @@ type Alert struct {
 	Threshold float64
 }
 
-// LogToCSV appends a single alert row into alerts_YYYYMMDD.csv
+// LogToCSV appends a single alert row into alerts/alerts_YYYYMMDD.csv
 func LogToCSV(alert Alert) error {
-	filename := fmt.Sprintf("alerts_%s.csv", alert.Timestamp.Format("20060102"))
+    // Ensure ./alerts exists
+    dir := "alerts"
+    if err := os.MkdirAll(dir, 0o755); err != nil {
+        return err
+    }
+
+    filename := filepath.Join(dir, fmt.Sprintf("alerts_%s.csv", alert.Timestamp.Format("20060102")))
 	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err

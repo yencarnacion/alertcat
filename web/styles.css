@@ -315,3 +315,11 @@ td{ background:#121218; color:#cbd5e1; }
 #alertsTable tbody tr:hover td{
   filter: brightness(1.06);
 }
+
+/* Price deltas in RVOL table */
+.delta {
+  font-weight: 700;
+  margin-left: 4px;
+}
+.delta.pos { color: var(--green); }
+.delta.neg { color: var(--red); }
