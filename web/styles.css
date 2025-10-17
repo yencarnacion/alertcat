@@ -286,3 +286,32 @@ th, td{ padding:6px 8px; border:1px solid #1c2130; text-align:left; }
 th{ background:#0f1016; color:#d6d9e0; font-weight:700; }
 td{ background:#121218; color:#cbd5e1; }
 .check{ display:flex; align-items:center; gap:8px; padding:0 6px 6px; }
+/* ===== RVOL table-only affordances & grouping ===== */
+#alertsTable th.sortable{
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  white-space: nowrap;
+}
+#alertsTable th.sortable::after{
+  content: " ⇅";
+  opacity: .45;
+  font-size: 11px;
+}
+#alertsTable th.sortable[data-dir="asc"]::after{ content: " ▲"; opacity: .95; }
+#alertsTable th.sortable[data-dir="desc"]::after{ content: " ▼"; opacity: .95; }
+
+/* Minute "zebra" bands (easy-on-eyes contrast) */
+#alertsTable tr.groupEven td { background: #121218; } /* existing tone */
+#alertsTable tr.groupOdd  td { background: #141824; } /* slightly offset tone */
+
+/* Bright divider at the start of every new minute */
+#alertsTable tr.minuteStart td{
+  border-top-width: 2px;
+  border-top-color: var(--blue);
+}
+
+/* Optional: row hover clarity (table only) */
+#alertsTable tbody tr:hover td{
+  filter: brightness(1.06);
+}

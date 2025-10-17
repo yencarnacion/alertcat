@@ -24,6 +24,9 @@ const bucketSize = document.getElementById("bucketSize");
 // NEW Recent Alerts
 const alertsTableBody = document.querySelector("#alertsTable tbody");
 const alertsCount = document.getElementById("alertsCount");
+// NEW: table head + sort state (per-minute sort)
+const alertsTableHead = document.querySelector("#alertsTable thead");
+let alertsSortState = { key: "volume", dir: "desc" }; // default: volume desc per minute
 // Pinned UI
 const pinnedWrap = document.getElementById("pinnedWrap");
 const pinnedList = document.getElementById("pinned");
@@ -362,26 +365,92 @@ function addIncomingAlert(a){
     if (isPinnedId(alertId(a))) playSound();
   }
 }
-// NEW: Render recent RVOL alerts
+// NEW: Render recent RVOL alerts (group by minute, sort per minute)
 function renderRecentAlerts() {
   if (!alertsTableBody || !alertsCount) return;
+
+  // Group newest minute at the top (we reverse the array to get newest-first chronology)
+  const recents = recentAlerts.slice().reverse();
+
+  // Build minute groups while preserving minute order as encountered
+  const groups = new Map(); // minuteStr -> array
+  const order = [];         // minuteStr in display order
+  for (const a of recents) {
+    const minuteKey = String(a.time || "").replace(/\s*ET\s*$/i, " ET"); // normalize & keep "ET"
+    if (!groups.has(minuteKey)) {
+      groups.set(minuteKey, []);
+      order.push(minuteKey);
+    }
+    groups.get(minuteKey).push(a);
+  }
+
+  // Comparator per current column + direction
+  const dirMul = alertsSortState.dir === "asc" ? 1 : -1;
+  const cmp = (a, b) => {
+    const k = alertsSortState.key;
+    let av, bv;
+    switch (k) {
+      case "symbol":
+        av = String(a.symbol || "").toUpperCase();
+        bv = String(b.symbol || "").toUpperCase();
+        if (av < bv) return -1 * dirMul;
+        if (av > bv) return  1 * dirMul;
+        // stable tiebreakers
+        return String(a.time).localeCompare(String(b.time));
+      case "price":
+      case "volume":
+      case "baseline":
+      case "rvol":
+        av = Number(a[k]);
+        bv = Number(b[k]);
+        if (av < bv) return -1 * dirMul;
+        if (av > bv) return  1 * dirMul;
+        return String(a.symbol).localeCompare(String(b.symbol));
+      default:
+        return 0;
+    }
+  };
+
+  // Build rows
   alertsTableBody.innerHTML = "";
   const frag = document.createDocumentFragment();
-  recentAlerts.slice().reverse().forEach(a => { // newest first
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${a.time}</td>
-      <td>${a.symbol}</td>
-      <td>$${Number(a.price).toFixed(2)}</td>
-      <td>${a.volume}</td>
-      <td>${Number(a.baseline).toFixed(0)}</td>
-      <td>${Number(a.rvol).toFixed(2)}</td>
-      <td>${a.method}</td>
-    `;
-    frag.appendChild(tr);
+
+  order.forEach((minuteStr, gIdx) => {
+    const arr = groups.get(minuteStr) || [];
+    // sort this minute only
+    if (alertsSortState.key) arr.sort(cmp);
+
+    arr.forEach((a, i) => {
+      const tr = document.createElement("tr");
+      tr.className = `${gIdx % 2 === 0 ? "groupEven" : "groupOdd"} ${i === 0 ? "minuteStart" : ""}`;
+      tr.setAttribute("data-minute", minuteStr);
+
+      tr.innerHTML = `
+        <td>${minuteStr}</td>
+        <td>${a.symbol}</td>
+        <td>$${Number(a.price).toFixed(2)}</td>
+        <td>${a.volume}</td>
+        <td>${Number(a.baseline).toFixed(0)}</td>
+        <td>${Number(a.rvol).toFixed(2)}</td>
+        <td>${a.method}</td>
+      `;
+      frag.appendChild(tr);
+    });
   });
+
   alertsTableBody.appendChild(frag);
   alertsCount.textContent = `(${recentAlerts.length})`;
+  updateAlertsSortIndicators();
+}
+
+function updateAlertsSortIndicators(){
+  if (!alertsTableHead) return;
+  alertsTableHead.querySelectorAll("th.sortable").forEach(th => {
+    const key = th.dataset.key || "";
+    const dir = alertsSortState.key === key ? alertsSortState.dir : "none";
+    th.setAttribute("data-dir", dir);
+    th.setAttribute("aria-sort", dir === "none" ? "none" : (dir === "asc" ? "ascending" : "descending"));
+  });
 }
 function addRvolAlert(msg) {
   recentAlerts.push({
@@ -880,6 +949,24 @@ function initCompact(){
   window.addEventListener("resize", () => {
     recomputeLiveCapacity();
   });
+  // === RVOL table header sorting (per-minute) ===
+  if (alertsTableHead) {
+    alertsTableHead.addEventListener("click", (e) => {
+      const th = e.target.closest("th.sortable");
+      if (!th) return;
+      const key = th.dataset.key;
+      if (!key) return;
+      if (alertsSortState.key === key) {
+        alertsSortState.dir = (alertsSortState.dir === "asc") ? "desc" : "asc";
+      } else {
+        alertsSortState.key = key;
+        alertsSortState.dir = "asc"; // first click = ascending
+      }
+      renderRecentAlerts();
+    });
+    // show default indicator (volume desc) on first paint
+    updateAlertsSortIndicators();
+  }
 })();
 
 function stopAllSounds() {
