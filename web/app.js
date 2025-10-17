@@ -32,7 +32,7 @@ const pinnedCountEl = document.getElementById("pinnedCount");
 let ws = null;
 let audioCtx = null;
 let audioBuf = null;
-let soundEnabled = false;
+let soundEnabled = true; // default: Sound ON
 let paused = false;
 let historyLoaded = false;
 let allAlerts = []; // [{kind:"lod"|"hod", sym, name, price, time, ts_unix}]
@@ -138,43 +138,74 @@ function shouldShow(kind){
 }
 function alertId(a){ return `${a.sym}_${a.ts_unix}_${a.kind}`; }
 // ----------------- Build & render cards -----------------
-function buildAlertCard(a, autoChart=false, isPinned=false) {
+function buildAlertCard(a, autoChart=false, isPinned=false, isLive=false) {
   const id = alertId(a);
   const card = document.createElement("div");
-  card.className = `card ${a.kind}${isPinned ? " isPinned" : ""}`;
+  card.className = `card ${a.kind}${isPinned ? " isPinned" : ""}${isLive ? " live" : ""}`;
   card.dataset.id = id;
   card.dataset.sym = a.sym;
   card.dataset.ts = String(a.ts_unix);
   card.dataset.kind = a.kind;
+  card.dataset.live = isLive ? "1" : "0";
   const label = a.kind === "hod" ? "NEW HOD" : "NEW LOD";
   const priceFmt = Number(a.price).toFixed(4).replace(/\.?0+$/, '');
-  card.innerHTML = `
-    <div class="left">
-      <span class="badge">${label}</span>
-      <span class="sym">${a.sym}</span>
-      <span class="name">${a.name || ""}</span>
-      <button class="iconBtn pinBtn" title="Pin/Unpin" aria-pressed="${isPinned ? "true" : "false"}">${isPinned ? "★" : "☆"}</button>
-    </div>
-    <div class="price">$${priceFmt}</div>
-    <div class="time">${a.time}</div>
-    <div class="chartRow">
-      <div class="chartBox disabled" id="chart_${id}" aria-hidden="true"></div>
-      <div class="chartBtns">
-        <button class="toggleChart" data-action="toggle">Enable chart</button>
+  if (isLive) {
+    // Live variant: no chart row, no "More news" link
+    card.innerHTML = `
+      <div class="left">
+        <span class="badge">${label}</span>
+        <span class="sym">${a.sym}</span>
+        <span class="name">${a.name || ""}</span>
+        <button class="iconBtn pinBtn" title="Pin/Unpin" aria-pressed="${isPinned ? "true" : "false"}">${isPinned ? "★" : "☆"}</button>
       </div>
-    </div>
-    <div class="infoRow">
-      <div class="infoCol">
-        <div class="sectionTitle">News</div>
-        <ul class="newsList" id="news_${id}" aria-live="polite"></ul>
-        <a class="moreLink" id="moreNews_${id}" target="_blank" rel="noopener">More news →</a>
+      <div class="price">$${priceFmt}</div>
+      <div class="time">${a.time}</div>
+      <div class="infoRow">
+        <div class="infoCol">
+          <div class="sectionTitle">News</div>
+          <ul class="newsList" id="news_${id}" aria-live="polite"></ul>
+        </div>
+        <div class="infoCol">
+          <div class="sectionTitle">SEC Filings (today)</div>
+          <ul class="secList" id="sec_${id}" aria-live="polite"></ul>
+        </div>
       </div>
-      <div class="infoCol">
-        <div class="sectionTitle">SEC Filings (today)</div>
-        <ul class="secList" id="sec_${id}" aria-live="polite"></ul>
+    `;
+  } else {
+    // Original (feed/pinned) variant
+    card.innerHTML = `
+      <div class="left">
+        <span class="badge">${label}</span>
+        <span class="sym">${a.sym}</span>
+        <span class="name">${a.name || ""}</span>
+        <button class="iconBtn pinBtn" title="Pin/Unpin" aria-pressed="${isPinned ? "true" : "false"}">${isPinned ? "★" : "☆"}</button>
       </div>
-    </div>
-  `;
+      <div class="price">$${priceFmt}</div>
+      <div class="time">${a.time}</div>
+      <div class="chartRow">
+        <div class="chartBox disabled" id="chart_${id}" aria-hidden="true"></div>
+        <div class="chartBtns">
+          <button class="toggleChart" data-action="toggle">Enable chart</button>
+        </div>
+      </div>
+      <div class="infoRow">
+        <div class="infoCol">
+          <div class="sectionTitle">News</div>
+          <ul class="newsList" id="news_${id}" aria-live="polite"></ul>
+          <a class="moreLink" id="moreNews_${id}" target="_blank" rel="noopener">More news →</a>
+        </div>
+        <div class="infoCol">
+          <div class="sectionTitle">SEC Filings (today)</div>
+          <ul class="secList" id="sec_${id}" aria-live="polite"></ul>
+        </div>
+      </div>
+    `;
+  }
+  // Prefill placeholders so Live cards never look empty while loading.
+  const newsUL0 = card.querySelector(`#news_${id}`);
+  const secUL0  = card.querySelector(`#sec_${id}`);
+  if (newsUL0) newsUL0.innerHTML = `<li class="muted">loading…</li>`;
+  if (secUL0)  secUL0.innerHTML  = `<li class="muted">loading…</li>`;
   // Pin button
   const pinBtn = card.querySelector('.pinBtn');
   pinBtn.addEventListener('click', (e) => {
@@ -183,21 +214,23 @@ function buildAlertCard(a, autoChart=false, isPinned=false) {
   });
   // Chart toggle
   const btn = card.querySelector('button.toggleChart');
-  btn.addEventListener('click', async () => {
-    if (chartsById.has(id)) {
-      destroyChart(id);
-      btn.textContent = "Enable chart";
-      btn.classList.remove('active');
-      card.querySelector('.chartBox').classList.add('disabled');
-    } else {
-      // Show box BEFORE creating chart so sizing works
-      card.querySelector('.chartBox').classList.remove('disabled');
-      await ensureUnderLimitThenSpawn(id, a.sym);
-      btn.textContent = "Disable chart";
-      btn.classList.add('active');
-    }
-  });
-  if (autoChart) {
+  if (btn) {
+    btn.addEventListener('click', async () => {
+      if (chartsById.has(id)) {
+        destroyChart(id);
+        btn.textContent = "Enable chart";
+        btn.classList.remove('active');
+        card.querySelector('.chartBox').classList.add('disabled');
+      } else {
+        // Show box BEFORE creating chart so sizing works
+        card.querySelector('.chartBox').classList.remove('disabled');
+        await ensureUnderLimitThenSpawn(id, a.sym);
+        btn.textContent = "Disable chart";
+        btn.classList.add('active');
+      }
+    });
+  }
+  if (autoChart && btn) {
     setTimeout(async () => {
       // Show box BEFORE creating chart so sizing works
       card.querySelector('.chartBox').classList.remove('disabled');
@@ -207,7 +240,8 @@ function buildAlertCard(a, autoChart=false, isPinned=false) {
       tbtn.classList.add('active');
     }, 0);
   }
-  setTimeout(() => populateNewsAndFilings(a.sym, id), 0);
+  // Populate News/SEC scoped to THIS card to avoid duplicate-ID collisions
+  setTimeout(() => populateNewsAndFilingsForCard(card, a.sym), 0);
   return card;
 }
 function renderPinned() {
@@ -295,14 +329,14 @@ function seedLiveFromHistory() {
     const a = allAlerts[i];
     if (!a) continue;
     if (!shouldShow(a.kind) || isPinnedId(alertId(a))) continue;
-    const node = buildAlertCard(a, false, false);
+    const node = buildAlertCard(a, false, false, true); // LIVE variant
     liveFeed.prepend(node); // newest ends up at top
   }
   trimLive();
 }
 function addLiveCard(a) {
   if (!liveFeed) return;
-  const node = buildAlertCard(a, false, false);
+  const node = buildAlertCard(a, false, false, true); // LIVE variant
   liveFeed.prepend(node); // newest to top
   trimLive();
 }
@@ -473,72 +507,137 @@ async function spawnChart(id, sym) {
   chartsById.set(id, { chart, series, container: box, timer, ro });
 }
 // ----------------- News + SEC -----------------
-async function populateNewsAndFilings(sym, id) {
-  const newsUL = document.getElementById(`news_${id}`);
-  const moreA = document.getElementById(`moreNews_${id}`);
-  const secUL = document.getElementById(`sec_${id}`);
-  if (!newsUL || !moreA || !secUL) return;
+function sameETDate(iso, ymd) {
+  if (!iso) return false;
+  try {
+    const d = new Date(iso);
+    const s = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year:'numeric', month:'2-digit', day:'2-digit' }).format(d);
+    return s === ymd;
+  } catch { return false; }
+}
+// NEW: scope to the specific card; ensures Live cards are populated
+async function populateNewsAndFilingsForCard(cardEl, sym) {
+  if (!cardEl) return;
+  const newsUL = cardEl.querySelector('.newsList');
+  const secUL  = cardEl.querySelector('.secList');
+  if (!newsUL || !secUL) return;
+
+  const isLive = cardEl.classList.contains('live');
   const d = sessionDateET || todayISO();
-  moreA.href = `/news.html?ticker=${encodeURIComponent(sym)}&date=${encodeURIComponent(d)}`;
+
+  const moreA = cardEl.querySelector('.moreLink');
+  if (moreA) {
+    moreA.href = `/news.html?ticker=${encodeURIComponent(sym)}&date=${encodeURIComponent(d)}`;
+  }
+
   try {
     const res = await fetch(`/api/extra?ticker=${encodeURIComponent(sym)}&date=${encodeURIComponent(d)}&days=2`, { cache: 'no-store' });
     const j = await res.json();
+
+    // ----- News -----
     const news = Array.isArray(j?.news) ? j.news : [];
-    if (news.length === 0) {
-      newsUL.innerHTML = `<li class="muted">No headlines.</li>`;
-    } else {
-      const top5 = news.slice(0, 5);
-      newsUL.innerHTML = "";
-      top5.forEach(n => {
+    newsUL.innerHTML = "";
+    if (isLive) {
+      const todays = news
+        .filter(n => sameETDate(n.published, d))
+        .sort((a,b)=> new Date(b.published) - new Date(a.published));
+      if (todays.length === 0) {
+        newsUL.innerHTML = `<li class="muted">no headlines</li>`;
+      } else {
+        const n = todays[0];
+        const time = n.published ? new Date(n.published).toLocaleString() : "";
         const li = document.createElement("li");
         li.className = "newsItem";
-        const time = n.published ? new Date(n.published).toLocaleString() : "";
         li.innerHTML = `
           <a href="${n.url}" target="_blank" rel="noopener">
             <span class="headline">${escapeHTML(n.title || "")}</span>
             <span class="meta">${escapeHTML(n.source || "News")} • ${escapeHTML(time)}</span>
-          </a>
-        `;
+          </a>`;
         newsUL.appendChild(li);
-      });
-    }
-    const filings = Array.isArray(j?.filings) ? j.filings : [];
-    if (filings.length === 0) {
-      secUL.innerHTML = `<li class="muted">No SEC filings today.</li>`;
+      }
     } else {
-      secUL.innerHTML = "";
-      const limit = 5;
-      filings.forEach((f, idx) => {
-        const li = document.createElement("li");
-        li.className = "secItem" + (idx >= limit ? " hidden" : "");
+      if (news.length === 0) {
+        newsUL.innerHTML = `<li class="muted">No headlines.</li>`;
+      } else {
+        news.slice(0, 5).forEach(n => {
+          const li = document.createElement("li");
+          li.className = "newsItem";
+          const time = n.published ? new Date(n.published).toLocaleString() : "";
+          li.innerHTML = `
+            <a href="${n.url}" target="_blank" rel="noopener">
+              <span class="headline">${escapeHTML(n.title || "")}</span>
+              <span class="meta">${escapeHTML(n.source || "News")} • ${escapeHTML(time)}</span>
+            </a>`;
+          newsUL.appendChild(li);
+        });
+      }
+    }
+
+    // ----- SEC filings -----
+    const filings = Array.isArray(j?.filings) ? j.filings : [];
+    secUL.innerHTML = "";
+    if (isLive) {
+      const todaysF = filings
+        .filter(f => sameETDate(f.filedAt, d))
+        .sort((a,b)=> new Date(b.filedAt) - new Date(a.filedAt));
+      if (todaysF.length === 0) {
+        secUL.innerHTML = `<li class="muted">no sec filings today</li>`;
+      } else {
+        const f = todaysF[0];
         const filedAt = f.filedAt ? new Date(f.filedAt).toLocaleString() : "";
         const desc = f.description || f.formType || "Filing";
         const link = f.linkToFilingDetails || "#";
         const label = f.formType ? `<span class="formType">${escapeHTML(f.formType)}</span>` : "";
+        const li = document.createElement("li");
+        li.className = "secItem";
         li.innerHTML = `
           <a href="${link}" target="_blank" rel="noopener">
             <span class="headline">${label} ${escapeHTML(desc)}</span>
             <span class="meta">${escapeHTML(f.companyName || "")} • ${escapeHTML(filedAt)}</span>
-          </a>
-        `;
+          </a>`;
         secUL.appendChild(li);
-      });
-      if (filings.length > limit) {
-        const more = document.createElement("button");
-        more.className = "linkBtn";
-        more.textContent = `more… (${filings.length - limit})`;
-        more.addEventListener("click", () => {
-          secUL.querySelectorAll(".secItem.hidden").forEach(el => el.classList.remove("hidden"));
-          more.remove();
+      }
+    } else {
+      if (filings.length === 0) {
+        secUL.innerHTML = `<li class="muted">No SEC filings today.</li>`;
+      } else {
+        const limit = 5;
+        filings.forEach((f, idx) => {
+          const li = document.createElement("li");
+          li.className = "secItem" + (idx >= limit ? " hidden" : "");
+          const filedAt = f.filedAt ? new Date(f.filedAt).toLocaleString() : "";
+          const desc = f.description || f.formType || "Filing";
+          const link = f.linkToFilingDetails || "#";
+          const label = f.formType ? `<span class="formType">${escapeHTML(f.formType)}</span>` : "";
+          li.innerHTML = `
+            <a href="${link}" target="_blank" rel="noopener">
+              <span class="headline">${label} ${escapeHTML(desc)}</span>
+              <span class="meta">${escapeHTML(f.companyName || "")} • ${escapeHTML(filedAt)}</span>
+            </a>`;
+          secUL.appendChild(li);
         });
-        const wrap = document.createElement("div");
-        wrap.appendChild(more);
-        secUL.parentElement.appendChild(wrap);
+        if (filings.length > limit) {
+          const more = document.createElement("button");
+          more.className = "linkBtn";
+          more.textContent = `more… (${filings.length - limit})`;
+          more.addEventListener("click", () => {
+            secUL.querySelectorAll(".secItem.hidden").forEach(el => el.classList.remove("hidden"));
+            more.remove();
+          });
+          const wrap = document.createElement("div");
+          wrap.appendChild(more);
+          secUL.parentElement.appendChild(wrap);
+        }
       }
     }
-  } catch (e) {
+  } catch {
     newsUL.innerHTML = `<li class="muted">News unavailable.</li>`;
     secUL.innerHTML = `<li class="muted">SEC unavailable.</li>`;
+  }
+
+  // right column might grow: recompute capacity so nothing gets clipped
+  if (cardEl.classList.contains('live')) {
+    recomputeLiveCapacity();
   }
 }
 function escapeHTML(s) {
@@ -670,7 +769,12 @@ function initCompact(){
   setStatus("Loading…");
   loadSound().then(() => {});
   loadPins();
+  // Default sound ON; prime/resume audio context on first gesture
+  if (soundState) soundState.textContent = "Sound ON";
   soundBtn.addEventListener("click", enableSound);
+  window.addEventListener('pointerdown', enableSound, { once:true });
+  window.addEventListener('keydown',    enableSound, { once:true });
+  window.addEventListener('touchstart', enableSound, { once:true });
   // Compact mode first so layout is set before initial renders
   initCompact();
   if (chkCompact) {

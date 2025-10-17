@@ -11,18 +11,13 @@
 <body>
   <header class="topbar">
     <div class="brand">alertcat</div>
-    <div id="status" class="pill">Disconnected</div>
+    <div class="topRight">
+      <button id="soundBtn" class="primary">Enable sound</button>
+      <span id="soundState" class="muted">Sound ON</span>
+      <div id="status" class="pill">Disconnected</div>
+    </div>
   </header>
   <main class="container">
-    <section class="panel intro">
-      <div>
-        New <b>High/Low-of-Day</b> alerts <span class="muted">(times shown in ET)</span>. Newest appears on top.
-      </div>
-      <div class="controls">
-        <button id="soundBtn" class="primary">Enable sound</button>
-        <span id="soundState" class="muted">Sound OFF</span>
-      </div>
-    </section>
     <section class="panel controls">
       <div class="field">
         <label for="dateInput">Date (ET)</label>
@@ -80,7 +75,7 @@
       </div>
       <div class="field">
         <span>RVOL Active</span>
-        <label><input type="checkbox" id="rvolActive" checked> Enable</label>
+        <label><input type="checkbox" id="rvolActive"> Enable</label>
       </div>
       <div class="field">
         <label for="bucketSize">Bucket Size</label>

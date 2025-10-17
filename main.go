@@ -553,7 +553,7 @@ func newRvolManager(cfg AppConfig, et *time.Location, polygonKey string, h *hub)
 		threshold:    cfg.Rvol.DefaultThreshold,
 		method:       rvolpkg.Method(strings.ToUpper(strings.TrimSpace(cfg.Rvol.DefaultMethod))),
 		baselineMode: strings.ToLower(strings.TrimSpace(cfg.Rvol.BaselineMode)),
-		active:       true,
+		active:       false, // default RVOL inactive (UI unchecked)
 		cooldownSec:  maxInt(1, cfg.Alert.CooldownSeconds),
 		baselines:    make(map[string]rvolpkg.Baselines),
 		lastMinute:   make(map[string]time.Time),

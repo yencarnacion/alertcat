@@ -30,6 +30,7 @@ body{
   display:flex; align-items:center; justify-content:space-between;
   padding:10px 14px; background:#0f1016; border-bottom:1px solid #1c1f25;
 }
+.topRight{ display:flex; align-items:center; gap:10px; }
 .brand{ font-weight:800; letter-spacing:.3px; }
 .brand .muted{ color: var(--muted); font-weight:600; }
 .pill{ padding:5px 8px; border-radius:999px; background:var(--pill); font-size:11px; }
@@ -39,6 +40,8 @@ body{
   background:var(--panel); border:1px solid #1c1f25; border-radius:10px;
   padding:12px;
 }
+/* Make settings block a bit tighter (no font size change) */
+.panel.controls{ padding:10px; }
 .intro{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .controls{ display:flex; flex-wrap: wrap; gap:12px; align-items:flex-end; }
 .field{ display:flex; flex-direction:column; gap:6px; min-width: 220px; }
@@ -99,6 +102,20 @@ button:hover{ filter:brightness(1.06); }
   border-radius:10px;
   padding:12px 14px;
 }
+/* Live (right column) variant: smaller, top-row header, no chart row */
+.card.live{
+  grid-template-columns: 1fr auto auto;
+  grid-template-areas:
+    "left price time"
+    "infos infos infos";
+  padding:8px 10px;
+  gap:8px 10px;
+  border-radius:8px;
+}
+.card.live .chartRow,
+.card.live .chartBox,
+.card.live .chartBtns{ display:none !important; }
+.card.live .infoRow{ margin-top:4px; gap:10px; }
 .card.lod{ border-color: var(--red); }
 .card.hod{ border-color: var(--green); }
 .card.isPinned{ border-color: var(--yellow); box-shadow: 0 0 0 1px rgba(255, 204, 0, 0.25) inset; }
@@ -158,6 +175,13 @@ button:hover{ filter:brightness(1.06); }
 .newsItem a, .secItem a{
   display:block;
   text-decoration:none;
+  padding:6px 8px;
+  border-radius:6px;
+  background:#141824;
+  border:1px solid #1f2430;
+}
+.newsList .muted, .secList .muted{
+  display:block;
   padding:6px 8px;
   border-radius:6px;
   background:#141824;
