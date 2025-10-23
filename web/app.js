@@ -42,6 +42,8 @@ let allAlerts = []; // [{kind:"lod"|"hod", sym, name, price, time, ts_unix}]
 let recentAlerts = []; // for RVOL [{time, symbol, price, volume, baseline, rvol, method}]
 let silent = false;
 let sessionDateET = ""; // YYYY-MM-DD (from /api/status)
+// ---- FMP profile cache (in this browser for the day) ----
+const profileCache = new Map(); // sym -> { marketCap:number, country:string, industry:string }
 // --- Mini chart management ---
 let chartsLimit = 5; // (was const) allow dynamic limit in compact mode
 const chartsById = new Map();
@@ -161,7 +163,12 @@ function buildAlertCard(a, autoChart=false, isPinned=false, isLive=false) {
         <span class="name">${a.name || ""}</span>
         <button class="iconBtn pinBtn" title="Pin/Unpin" aria-pressed="${isPinned ? "true" : "false"}">${isPinned ? "★" : "☆"}</button>
       </div>
-      <div class="price">$${priceFmt}</div>
+      <div class="price">
+        <span class="cap" title="Market cap">—</span>
+        <span class="country" title="Country">—</span>
+        <span class="industry" title="Industry">—</span>
+        <span class="pv">$${priceFmt}</span>
+      </div>
       <div class="time">${a.time}</div>
       <div class="infoRow">
         <div class="infoCol">
@@ -183,7 +190,12 @@ function buildAlertCard(a, autoChart=false, isPinned=false, isLive=false) {
         <span class="name">${a.name || ""}</span>
         <button class="iconBtn pinBtn" title="Pin/Unpin" aria-pressed="${isPinned ? "true" : "false"}">${isPinned ? "★" : "☆"}</button>
       </div>
-      <div class="price">$${priceFmt}</div>
+      <div class="price">
+        <span class="cap" title="Market cap">—</span>
+        <span class="country" title="Country">—</span>
+        <span class="industry" title="Industry">—</span>
+        <span class="pv">$${priceFmt}</span>
+      </div>
       <div class="time">${a.time}</div>
       <div class="chartRow">
         <div class="chartBox disabled" id="chart_${id}" aria-hidden="true"></div>
@@ -209,6 +221,8 @@ function buildAlertCard(a, autoChart=false, isPinned=false, isLive=false) {
   const secUL0  = card.querySelector(`#sec_${id}`);
   if (newsUL0) newsUL0.innerHTML = `<li class="muted">loading…</li>`;
   if (secUL0)  secUL0.innerHTML  = `<li class="muted">loading…</li>`;
+  // Kick off profile fetch (FMP) to fill cap/country/industry inline with price
+  setTimeout(() => populateProfileForCard(card, a.sym), 0);
   // Pin button
   const pinBtn = card.querySelector('.pinBtn');
   pinBtn.addEventListener('click', (e) => {
@@ -981,4 +995,60 @@ function initCompact(){
 
 function stopAllSounds() {
   // Placeholder for stopping sounds if needed
+}
+
+// =======================
+// FMP profile helpers
+// =======================
+function formatMarketCap(n) {
+  const num = Number(n) || 0;
+  const abs = Math.abs(num);
+  let val, suf;
+  if (abs >= 1e9) { // billions (and trillions expressed as B with thousands separators)
+    val = num / 1e9; suf = "B";
+  } else if (abs >= 1e6) {
+    val = num / 1e6; suf = "M";
+  } else {
+    val = num / 1e3; suf = "K";
+  }
+  const rounded = Math.round(val * 10) / 10; // at most 1 decimal place
+  // Use locale grouping with at most 1 decimal place
+  const txt = rounded.toLocaleString(undefined, {
+    minimumFractionDigits: (Math.abs(rounded - Math.trunc(rounded)) > 0) ? 1 : 0,
+    maximumFractionDigits: 1,
+  });
+  return `${txt} ${suf}`;
+}
+async function getProfile(sym) {
+  const k = String(sym || "").toUpperCase();
+  if (!k) return null;
+  if (profileCache.has(k)) return profileCache.get(k);
+  try {
+    const res = await fetch(`/api/profile?ticker=${encodeURIComponent(k)}`, { cache: "no-store" });
+    const j = await res.json();
+    const info = {
+      marketCap: Number(j?.marketCap) || 0,
+      country: String(j?.country || ""),
+      industry: String(j?.industry || ""),
+    };
+    profileCache.set(k, info);
+    return info;
+  } catch {
+    return null;
+  }
+}
+async function populateProfileForCard(cardEl, sym) {
+  if (!cardEl) return;
+  const priceEl = cardEl.querySelector(".price");
+  if (!priceEl) return;
+  try {
+    const info = await getProfile(sym);
+    if (!info) return;
+    const capEl = priceEl.querySelector(".cap");
+    const ctyEl = priceEl.querySelector(".country");
+    const indEl = priceEl.querySelector(".industry");
+    if (capEl) capEl.textContent = formatMarketCap(info.marketCap);
+    if (ctyEl) ctyEl.textContent = info.country || "";
+    if (indEl) indEl.textContent = info.industry || "";
+  } catch {/* no-op */}
 }

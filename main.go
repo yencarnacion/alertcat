@@ -919,6 +919,77 @@ type SecFiling struct {
 	LinkToFilingDetails string `json:"linkToFilingDetails"`
 }
 
+// ===== FMP Profile (cached for the day) =====
+type ProfileInfo struct {
+    Symbol    string  `json:"symbol"`
+    MarketCap float64 `json:"marketCap"`
+    Country   string  `json:"country"`
+    Industry  string  `json:"industry"`
+}
+
+var profMu sync.RWMutex
+var profBySym = make(map[string]ProfileInfo) // reset on stream start (new session/day)
+
+func fetchFmpProfileCached(fmpKey, symbol string) (ProfileInfo, error) {
+    s := strings.ToUpper(strings.TrimSpace(symbol))
+    if s == "" {
+        return ProfileInfo{}, fmt.Errorf("missing ticker")
+    }
+    // Cache hit?
+    profMu.RLock()
+    if p, ok := profBySym[s]; ok {
+        profMu.RUnlock()
+        return p, nil
+    }
+    profMu.RUnlock()
+    if fmpKey == "" {
+        return ProfileInfo{}, fmt.Errorf("FMP_API_KEY is missing")
+    }
+    u := fmt.Sprintf("https://financialmodelingprep.com/stable/profile?symbol=%s&apikey=%s", s, fmpKey)
+    resp, err := httpClient.Get(u)
+    if err != nil {
+        if resp != nil {
+            _ = resp.Body.Close()
+        }
+        return ProfileInfo{}, err
+    }
+    defer resp.Body.Close()
+    if resp.StatusCode != http.StatusOK {
+        return ProfileInfo{}, fmt.Errorf("fmp status %d", resp.StatusCode)
+    }
+    var arr []map[string]any
+    if err := json.NewDecoder(resp.Body).Decode(&arr); err != nil {
+        return ProfileInfo{}, err
+    }
+    info := ProfileInfo{Symbol: s}
+    if len(arr) > 0 {
+        m := arr[0]
+        switch v := m["marketCap"].(type) {
+        case float64:
+            info.MarketCap = v
+        case json.Number:
+            if f, e := v.Float64(); e == nil {
+                info.MarketCap = f
+            }
+        case int64:
+            info.MarketCap = float64(v)
+        case int:
+            info.MarketCap = float64(v)
+        }
+        if c, ok := m["country"].(string); ok {
+            info.Country = c
+        }
+        if ind, ok := m["industry"].(string); ok {
+            info.Industry = ind
+        }
+    }
+    // Cache (store even if mostly empty to avoid refetch storms).
+    profMu.Lock()
+    profBySym[s] = info
+    profMu.Unlock()
+    return info, nil
+}
+
 func fetchPolygonNews(polygonKey, ticker, fromDate, toDateIncl string) []NewsItem {
 	if polygonKey == "" { return nil }
 	toLt := func(d string) string {
@@ -1264,6 +1335,10 @@ func main() {
                 subs = make(map[string]*poly.Subscription)
                 subsMu.Unlock()
             }
+			// clear profile cache when stopping (safe)
+			profMu.Lock()
+			profBySym = make(map[string]ProfileInfo)
+			profMu.Unlock()
 			h.broadcast(statusMsg{Type:"status", Level:"info", Text:"Stopped"})
 			_ = json.NewEncoder(w).Encode(streamResp{OK:true, Status:"Stopped"})
 		case "start":
@@ -1290,6 +1365,10 @@ func main() {
 			// reset stores
 			bars.reset()
 			h.resetHistories()
+			// reset FMP profile cache for the new trading day/session
+			profMu.Lock()
+			profBySym = make(map[string]ProfileInfo)
+			profMu.Unlock()
             // IMPORTANT: HOD/LOD begins at 16:06 when PM is selected
             odStartET := startET
             if sess == SessionPre || sess == SessionPM {
@@ -1374,6 +1453,29 @@ func main() {
 		if r.Method != http.MethodPost { http.Error(w, "POST only", http.StatusMethodNotAllowed); return }
 		h.resetHistories()
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	})
+
+	// API: company profile (marketCap/country/industry) — cached per day
+	mux.HandleFunc("/api/profile", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		q := r.URL.Query()
+		ticker := strings.ToUpper(strings.TrimSpace(q.Get("ticker")))
+		if ticker == "" {
+			http.Error(w, "ticker required", http.StatusBadRequest)
+			return
+		}
+		info, err := fetchFmpProfileCached(fmpKey, ticker)
+		if err != nil {
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":        true,
+			"symbol":    info.Symbol,
+			"marketCap": info.MarketCap,
+			"country":   info.Country,
+			"industry":  info.Industry,
+		})
 	})
 
 	// API: mini chart bars

@@ -124,6 +124,32 @@ button:hover{ filter:brightness(1.06); }
 .sym{ font-weight:800; font-size:16px; letter-spacing:.2px; }
 .name{ color:var(--muted); font-size:12px; max-width: 44ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .price{ grid-area:price; font-variant-numeric: tabular-nums; font-weight:800; font-size:16px; }
+.price{
+  grid-area: price;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+  font-weight: normal;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.price .pv{
+  font-weight: 800;
+  font-size: 16px;
+}
+.price .cap,
+.price .country,
+.price .industry{
+  color: var(--muted);
+  font-size: 12px;
+}
+.price .industry{
+  max-width: 26ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .time{ grid-area:time; color:var(--muted); font-variant-numeric: tabular-nums; min-width: 80px; text-align:right; font-size:12px; }
 .chartRow{ grid-area:chart; display:flex; align-items:center; gap:12px; }
 .chartBox{
@@ -254,6 +280,8 @@ body.compact .badge{ font-size:11px; padding:2px 6px; }
 body.compact .sym{ font-size:16px; }
 body.compact .name{ display:none; } /* save horizontal space */
 body.compact .price{ font-size:16px; }
+body.compact .price{ font-size: 12px; }
+body.compact .price .pv{ font-size:16px; }
 body.compact .time{ font-size:12px; min-width:72px; }
 body.compact .chartRow{ gap:8px; }
 body.compact .chartBox{
