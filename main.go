@@ -23,8 +23,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
-	polygonrest "github.com/polygon-io/client-go/rest"
-	rmodels "github.com/polygon-io/client-go/rest/models"
+	massiverest "github.com/massive-com/client-go/v2/rest"
+	mmodels "github.com/massive-com/client-go/v2/rest/models"
 	"gopkg.in/yaml.v3"
 
 	"alertcat/internal/alerts"
@@ -539,7 +539,7 @@ type rvolManager struct {
 	et          *time.Location
 	polygonKey  string
 	httpClient  *http.Client
-    rest        *polygonrest.Client
+    rest        *massiverest.Client
 	threshold   float64
 	method      rvolpkg.Method
 	baselineMode string // "cumulative" or "single"
@@ -565,7 +565,7 @@ func newRvolManager(cfg AppConfig, et *time.Location, polygonKey string, h *hub)
 		et:           et,
 		polygonKey:   polygonKey,
         httpClient:   &http.Client{Timeout: 10 * time.Second},
-        rest:         polygonrest.NewWithClient(polygonKey, &http.Client{Timeout: 10 * time.Second}),
+    rest:         massiverest.NewWithClient(polygonKey, &http.Client{Timeout: 10 * time.Second}),
 		threshold:    cfg.Rvol.DefaultThreshold,
 		method:       rvolpkg.Method(strings.ToUpper(strings.TrimSpace(cfg.Rvol.DefaultMethod))),
 		baselineMode: strings.ToLower(strings.TrimSpace(cfg.Rvol.BaselineMode)),
@@ -591,16 +591,16 @@ func (m *rvolManager) fetchPrevClose(sym string, currStartET time.Time) (float64
     }
     prevStart := currStartET.Add(-1 * time.Minute)
 
-    params := &rmodels.ListAggsParams{
+    params := &mmodels.ListAggsParams{
         Ticker:     sym,
-        Timespan:   rmodels.Minute,
+        Timespan:   mmodels.Minute,
         Multiplier: 1,
-        From:       rmodels.Millis(prevStart),
+        From:       mmodels.Millis(prevStart),
         // REST 'To' is exclusive; use currStart to include exactly the previous minute bar.
-        To: rmodels.Millis(currStartET),
+        To: mmodels.Millis(currStartET),
     }
     lim := 2
-    asc := rmodels.Asc
+    asc := mmodels.Asc
     adj := true
     params.Limit = &lim
     params.Order = &asc
@@ -1029,7 +1029,7 @@ func fetchPolygonNews(polygonKey, ticker, fromDate, toDateIncl string) []NewsIte
 		t, _ := time.Parse("2006-01-02", d)
 		return t.Add(24*time.Hour).Format("2006-01-02")
 	}(toDateIncl)
-	u := fmt.Sprintf("https://api.polygon.io/v2/reference/news?ticker=%s&published_utc.gte=%s&published_utc.lt=%s&limit=50&sort=published_utc.desc&apiKey=%s",
+	u := fmt.Sprintf("https://api.massive.com/v2/reference/news?ticker=%s&published_utc.gte=%s&published_utc.lt=%s&limit=50&sort=published_utc.desc&apiKey=%s",
 		ticker, fromDate, toLt, polygonKey)
 	resp, err := httpClient.Get(u)
 	if err != nil || resp.StatusCode != http.StatusOK {
@@ -1136,7 +1136,7 @@ func seedSessionHiLo(et *time.Location, polygonKey string, symbols []string, nam
     ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
     defer cancel()
 
-    rest := polygonrest.NewWithClient(polygonKey, httpClient)
+    rest := massiverest.NewWithClient(polygonKey, httpClient)
 
     maxParallel := 5
     sem := make(chan struct{}, maxParallel)
@@ -1150,16 +1150,16 @@ func seedSessionHiLo(et *time.Location, polygonKey string, symbols []string, nam
             sem <- struct{}{}
             defer func() { <-sem }()
 
-            params := &rmodels.ListAggsParams{
+            params := &mmodels.ListAggsParams{
                 Ticker:     s,
-                Timespan:   rmodels.Minute,
+                Timespan:   mmodels.Minute,
                 Multiplier: 1,
-                From:       rmodels.Millis(sessStartET),
+                From:       mmodels.Millis(sessStartET),
                 // Polygon's REST uses an exclusive upper bound; add 1 minute to include the current minute bar if present.
-                To: rmodels.Millis(nowET.Add(1 * time.Minute)),
+                To: mmodels.Millis(nowET.Add(1 * time.Minute)),
             }
             lim := 50000
-            asc := rmodels.Asc
+            asc := mmodels.Asc
             adj := true
             params.Limit = &lim
             params.Order = &asc
@@ -1224,7 +1224,7 @@ func seedScalpVWAP(
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	rest := polygonrest.NewWithClient(polygonKey, httpClient)
+	rest := massiverest.NewWithClient(polygonKey, httpClient)
 
 	maxParallel := 5
 	sem := make(chan struct{}, maxParallel)
@@ -1238,16 +1238,16 @@ func seedScalpVWAP(
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			params := &rmodels.ListAggsParams{
+			params := &mmodels.ListAggsParams{
 				Ticker:     sym,
-				Timespan:   rmodels.Minute,
+				Timespan:   mmodels.Minute,
 				Multiplier: 1,
-				From:       rmodels.Millis(sessStartET),
+				From:       mmodels.Millis(sessStartET),
 				// exclusive upper bound; add 1 min to include current minute bar if exists
-				To: rmodels.Millis(nowET.Add(1 * time.Minute)),
+				To: mmodels.Millis(nowET.Add(1 * time.Minute)),
 			}
 			lim := 50000
-			asc := rmodels.Asc
+			asc := mmodels.Asc
 			adj := true
 			params.Limit = &lim
 			params.Order = &asc

@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	defaultWS = "wss://socket.polygon.io/stocks"
+	defaultWS = "wss://socket.massive.com/stocks"
 )
 
 type Trade struct {

@@ -5,7 +5,7 @@ go 1.21
 require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
-	github.com/polygon-io/client-go v1.16.16
+	github.com/massive-com/client-go/v2 v2.0.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

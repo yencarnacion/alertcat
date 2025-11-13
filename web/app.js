@@ -1040,7 +1040,9 @@ function handleScalpAlert(msg) {
   card.className = `card live scalp ${msg.kind} ${msg.phase}`;
   const phaseLabel = msg.phase === "trigger" ? "TRIGGER" : "SETUP";
   const kindLabel = msg.kind === "rubberband"
-    ? "Rubberband"
+    ? "Rubberband Down"
+    : msg.kind === "rubberband_up"
+    ? "Rubberband Up"
     : msg.kind === "backside"
     ? "Backside"
     : "Fashionably Late";

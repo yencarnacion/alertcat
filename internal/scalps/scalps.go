@@ -11,6 +11,7 @@ type Phase string
 
 const (
 	KindRubberband      Kind = "rubberband"
+	KindRubberbandUp    Kind = "rubberband_up"
 	KindBackside        Kind = "backside"
 	KindFashionablyLate Kind = "fashionably_late"
 
@@ -43,10 +44,15 @@ type Config struct {
 	Band1K float64 // e.g. 1.0
 	Band2K float64 // e.g. 2.0
 
-	// Rubberband
+	// Rubberband down
 	RbNetDropPct   float64 // e.g. 0.0075 (0.75%)
 	RbLookbackBars int     // e.g. 3
 	RbVolMult      float64 // 2x median(10)
+
+	// Rubberband up (parabolic)
+	RbUpNetRisePct   float64
+	RbUpLookbackBars int
+	RbUpVolMult      float64
 
 	// Backside
 	BacksideMinLenBars int     // >= 4
@@ -66,6 +72,10 @@ func DefaultConfig() Config {
 		RbNetDropPct:       0.0075,
 		RbLookbackBars:     3,
 		RbVolMult:          2.0,
+		// Upside rubberband (parabolic)
+		RbUpNetRisePct:     0.0075,
+		RbUpLookbackBars:   3,
+		RbUpVolMult:        2.0,
 		BacksideMinLenBars: 4,
 		BacksideMaxBoxPct:  0.004,
 		BacksideBreakPct:   0.0005,
@@ -254,12 +264,15 @@ func (d *Detector) OnBar(sym string, t time.Time, o, h, l, c, v float64) []Alert
 
 	var alerts []Alert
 
-	// 1) Rubberband
-	rbAlerts, capitulation := d.detectRubberband(s, bar, vwap)
+	// 1) Rubberband (down and up)
+	rbDownAlerts, capitulation := d.detectRubberbandDown(s, bar, vwap)
 	if capitulation {
 		s.LastCapitulationAt = bar.Time
 	}
-	alerts = append(alerts, rbAlerts...)
+	alerts = append(alerts, rbDownAlerts...)
+
+	rbUpAlerts := d.detectRubberbandUp(s, bar, vwap)
+	alerts = append(alerts, rbUpAlerts...)
 
 	// 2) Backside (depends on LastCapitulationAt)
 	bsAlerts := d.detectBackside(s, bar, vwap)
@@ -303,9 +316,12 @@ func (d *Detector) medianVolLastN(bars []OneMinBar, n int) float64 {
 	return 0.5 * (tmp[n/2-1] + tmp[n/2])
 }
 
-func (s *symState) bands(cfg Config) (vwap, band1Lower, band2Lower float64) {
+func (s *symState) bands(cfg Config) (vwap,
+	band1Lower, band2Lower,
+	band1Upper, band2Upper float64,
+) {
 	if s.VwapSumV <= 0 {
-		return 0, 0, 0
+		return 0, 0, 0, 0, 0
 	}
 	vwap = s.VwapSumPV / s.VwapSumV
 
@@ -317,7 +333,7 @@ func (s *symState) bands(cfg Config) (vwap, band1Lower, band2Lower float64) {
 	}
 	std := math.Sqrt(variance)
 	if std == 0 {
-		return vwap, 0, 0
+		return vwap, 0, 0, 0, 0
 	}
 
 	k1 := cfg.Band1K
@@ -331,32 +347,33 @@ func (s *symState) bands(cfg Config) (vwap, band1Lower, band2Lower float64) {
 
 	band1Lower = vwap - k1*std
 	band2Lower = vwap - k2*std
+	band1Upper = vwap + k1*std
+	band2Upper = vwap + k2*std
 	return
 }
 
 /* ===== Rubberband ===== */
 
-func (d *Detector) detectRubberband(s *symState, bar OneMinBar, vwap float64) (alerts []Alert, capitulation bool) {
+func (d *Detector) detectRubberbandDown(s *symState, bar OneMinBar, vwap float64) (alerts []Alert, capitulation bool) {
 	if vwap <= 0 || len(s.Bars) < d.cfg.RbLookbackBars+1 {
 		return
 	}
-	// Use std-dev bands derived from VWAP based on typical price history
-	v, b1, b2 := s.bands(d.cfg)
+	v, b1, b2, _, _ := s.bands(d.cfg)
 	if v <= 0 || b1 == 0 || b2 == 0 {
-		// insufficient history for bands
 		return
 	}
 	c := bar.Close
-	if c < b2 || c > b1 {
-		// not in the desired stretch zone
+
+	// Downside stretch zone: between band2Lower and band1Lower, closer to band2Lower.
+	if !(c >= b2 && c <= b1) {
 		return
 	}
-	if math.Abs(c-b2) >= math.Abs(c-b1) {
-		// not closer to band2 than band1
+	if math.Abs(c-b2) <= math.Abs(c-b1) {
+		// closer (or equal) to band2Lower than band1Lower (strictly focuses on deep stretch)
+	} else {
 		return
 	}
 
-	// Net drop over window
 	n := d.cfg.RbLookbackBars
 	start := s.Bars[len(s.Bars)-1-n].Close
 	end := c
@@ -368,29 +385,67 @@ func (d *Detector) detectRubberband(s *symState, bar OneMinBar, vwap float64) (a
 		return
 	}
 
-	// Volume: current >= 2x median last 10 bars
 	med10 := d.medianVolLastN(s.Bars, 10)
 	if med10 <= 0 || bar.Vol < d.cfg.RbVolMult*med10 {
 		return
 	}
 
-	// This bar is capitulation; emit setup
 	alerts = append(alerts, Alert{
 		Kind:  KindRubberband,
 		Phase: PhaseSetup,
 		Sym:   s.Symbol,
 		Time:  bar.Time.Format("15:04:05 ET"),
 		Price: c,
-		Info:  "capitulation near VWAP band2",
+		Info:  "rubberband down: capitulation near lower VWAP band2",
 	})
 	capitulation = true
+	return
+}
 
-	// Reversal trigger will be checked on the NEXT bar using state; but you requested
-	// "alert as much as triggered or setup, no cooldown". To avoid storing extra state,
-	// we also treat a strong green bar immediately after this capitulation as trigger
-	// when it independently satisfies the same rules; that is implemented in a
-	// lightweight way: on each bar we ONLY detect setup here, and trigger will be
-	// detected when conditions flip (see below).
+func (d *Detector) detectRubberbandUp(s *symState, bar OneMinBar, vwap float64) (alerts []Alert) {
+	if vwap <= 0 || len(s.Bars) < d.cfg.RbUpLookbackBars+1 {
+		return
+	}
+	v, _, _, b1u, b2u := s.bands(d.cfg)
+	if v <= 0 || b1u == 0 || b2u == 0 {
+		return
+	}
+	c := bar.Close
+
+	// Upside stretch zone: between band1Upper and band2Upper, closer to band2Upper.
+	if !(c >= b1u && c <= b2u) {
+		return
+	}
+	if math.Abs(c-b2u) <= math.Abs(c-b1u) {
+		// ok: closer to band2Upper
+	} else {
+		return
+	}
+
+	n := d.cfg.RbUpLookbackBars
+	start := s.Bars[len(s.Bars)-1-n].Close
+	end := c
+	if start <= 0 {
+		return
+	}
+	netRise := (end - start) / start
+	if netRise < d.cfg.RbUpNetRisePct {
+		return
+	}
+
+	med10 := d.medianVolLastN(s.Bars, 10)
+	if med10 <= 0 || bar.Vol < d.cfg.RbUpVolMult*med10 {
+		return
+	}
+
+	alerts = append(alerts, Alert{
+		Kind:  KindRubberbandUp,
+		Phase: PhaseSetup,
+		Sym:   s.Symbol,
+		Time:  bar.Time.Format("15:04:05 ET"),
+		Price: c,
+		Info:  "rubberband up: parabolic near upper VWAP band2",
+	})
 	return
 }
 

@@ -11,8 +11,8 @@ import (
     "sort"
     "time"
 
-    polygonrest "github.com/polygon-io/client-go/rest"
-    rmodels     "github.com/polygon-io/client-go/rest/models"
+    massiverest "github.com/massive-com/client-go/v2/rest"
+    mmodels     "github.com/massive-com/client-go/v2/rest/models"
 )
 
 type Method string
@@ -72,7 +72,7 @@ func Backfill(ctx context.Context, httpClient *http.Client, polygonKey, symbol s
     }
 
     // Use official client-go REST with chunked windows and retries.
-    rest := polygonrest.NewWithClient(polygonKey, httpClient)
+    rest := massiverest.NewWithClient(polygonKey, httpClient)
 
     // Query a wider CALENDAR window, then derive the most recent N TRADING days (strictly BEFORE anchorDate).
     day := anchorDate.In(et)
@@ -99,15 +99,15 @@ func Backfill(ctx context.Context, httpClient *http.Client, polygonKey, symbol s
         fromUTC := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
         toUTC   := time.Date(end.Year(),   end.Month(),   end.Day(),   0, 0, 0, 0, time.UTC).Add(24 * time.Hour)
 
-        params := &rmodels.ListAggsParams{
+        params := &mmodels.ListAggsParams{
             Ticker:     symbol,
-            Timespan:   rmodels.Minute,
+            Timespan:   mmodels.Minute,
             Multiplier: 1,
-            From:       rmodels.Millis(fromUTC),
-            To:         rmodels.Millis(toUTC),
+            From:       mmodels.Millis(fromUTC),
+            To:         mmodels.Millis(toUTC),
         }
         lim := 50000
-        asc := rmodels.Asc
+        asc := mmodels.Asc
         adj := true
         params.Limit = &lim
         params.Order = &asc

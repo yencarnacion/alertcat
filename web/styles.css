@@ -7,6 +7,7 @@
   --red:#ff3b3b;
   --yellow:#ffcc00;
   --blue:#2c7be5;
+  --magenta:#d946ef;
   --pill:#2a2f3a;
   --pill-on:#2c7be5;
   /* News/SEC */
@@ -356,7 +357,8 @@ td{ background:#121218; color:#cbd5e1; }
 .card.scalp {
   border-color: var(--blue);
 }
-.card.scalp.rubberband { border-color: var(--red); }
+.card.scalp.rubberband { border-color: #ff00ff; }
+.card.scalp.rubberband_up { border-color: var(--yellow); }
 .card.scalp.backside { border-color: var(--yellow); }
 .card.scalp.fashionably_late { border-color: var(--green); }
 
