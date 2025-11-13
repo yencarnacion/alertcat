@@ -49,6 +49,20 @@ scalpAudio.src = "/scalp.mp3";
 scalpAudio.preload = "auto";
 // ---- FMP profile cache (in this browser for the day) ----
 const profileCache = new Map(); // sym -> { marketCap:number, country:string, industry:string }
+// ---- UI config (from server via /api/status), with sane defaults ----
+let uiConfig = {
+  tinyCapMax: 10_000_000,           // $10M
+  industryRegex: "(medical|bio)"    // case-insensitive at runtime
+};
+let industryRe = null;
+function compileIndustryRegex(){
+  try {
+    industryRe = new RegExp(uiConfig.industryRegex, "i"); // force case-insensitive
+  } catch {
+    industryRe = /(medical|bio)/i;
+  }
+}
+compileIndustryRegex();
 // --- Mini chart management ---
 let chartsLimit = 5; // (was const) allow dynamic limit in compact mode
 const chartsById = new Map();
@@ -177,6 +191,17 @@ function shouldShow(kind){
 }
 function alertId(a){ return `${a.sym}_${a.ts_unix}_${a.kind}`; }
 // ----------------- Build & render cards -----------------
+function scalpTypeLabel(kind){
+  if (typeof kind !== "string" || !kind.startsWith("scalp_")) return "";
+  const parts = kind.split("_").slice(1); // drop "scalp"
+  const core = (parts[0] || "").toLowerCase();
+  if (core === "rubberband" || core === "rubberbandup" || core === "rubberband_up") return "Rubberband";
+  if (core === "backside") return "Backside";
+  if (core === "fashionably_late" || (core === "fashionably" && (parts[1]||"").toLowerCase()==="late")) return "Fashionably late";
+  // fallback: prettify
+  const raw = [core, parts[1] && !["setup","trigger"].includes(parts[1]) ? parts[1] : ""].filter(Boolean).join(" ");
+  return raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : "";
+}
 function buildAlertCard(a, autoChart=false, isPinned=false, isLive=false) {
   const id = alertId(a);
   const card = document.createElement("div");
@@ -214,6 +239,8 @@ function buildAlertCard(a, autoChart=false, isPinned=false, isLive=false) {
   card.dataset.live = isLive ? "1" : "0";
   const label = a.kind === "hod" ? "NEW HOD" : "NEW LOD";
   const priceFmt = Number(a.price).toFixed(4).replace(/\.?0+$/, '');
+  const scalpTxt = scalpTypeLabel(a.kind);
+  const scalpHTML = scalpTxt ? `<span class="scalpType" title="Scalp type">${scalpTxt}</span>` : "";
   if (isLive) {
     // Live variant: no chart row, no "More news" link
     card.innerHTML = `
@@ -222,6 +249,7 @@ function buildAlertCard(a, autoChart=false, isPinned=false, isLive=false) {
         <span class="sym">${a.sym}</span>
         <span class="name">${a.name || ""}</span>
         <button class="iconBtn pinBtn" title="Pin/Unpin" aria-pressed="${isPinned ? "true" : "false"}">${isPinned ? "★" : "☆"}</button>
+        ${scalpHTML}
       </div>
       <div class="price">
         <span class="cap" title="Market cap">—</span>
@@ -249,6 +277,7 @@ function buildAlertCard(a, autoChart=false, isPinned=false, isLive=false) {
         <span class="sym">${a.sym}</span>
         <span class="name">${a.name || ""}</span>
         <button class="iconBtn pinBtn" title="Pin/Unpin" aria-pressed="${isPinned ? "true" : "false"}">${isPinned ? "★" : "☆"}</button>
+        ${scalpHTML}
       </div>
       <div class="price">
         <span class="cap" title="Market cap">—</span>
@@ -911,6 +940,16 @@ async function initStatus() {
       }
       rvolActive.checked = !!j.rvol.active;
     }
+    // NEW: UI config (tiny cap threshold & industry regex)
+    if (j?.ui) {
+      if (typeof j.ui.tiny_cap_max === "number" && isFinite(j.ui.tiny_cap_max) && j.ui.tiny_cap_max > 0) {
+        uiConfig.tinyCapMax = j.ui.tiny_cap_max;
+      }
+      if (typeof j.ui.industry_regex === "string" && j.ui.industry_regex.trim() !== "") {
+        uiConfig.industryRegex = j.ui.industry_regex;
+      }
+      compileIndustryRegex();
+    }
   } catch {
     setStatus("Disconnected");
   }
@@ -1119,6 +1158,27 @@ async function getProfile(sym) {
     return null;
   }
 }
+function applyLiveHighlights(cardEl, info) {
+  if (!cardEl || !cardEl.classList.contains('live')) return;
+  const capEl = cardEl.querySelector(".cap");
+  if (capEl) {
+    const mc = Number(info?.marketCap || 0);
+    if (mc > 0 && mc < uiConfig.tinyCapMax) {
+      capEl.classList.add("isTinyCap");
+    } else {
+      capEl.classList.remove("isTinyCap");
+    }
+  }
+  const indEl = cardEl.querySelector(".industry");
+  if (indEl) {
+    const txt = String(info?.industry || "");
+    if (industryRe && txt && industryRe.test(txt)) {
+      indEl.classList.add("isIndustryFlag");
+    } else {
+      indEl.classList.remove("isIndustryFlag");
+    }
+  }
+}
 async function populateProfileForCard(cardEl, sym) {
   if (!cardEl) return;
   const priceEl = cardEl.querySelector(".price");
@@ -1132,5 +1192,7 @@ async function populateProfileForCard(cardEl, sym) {
     if (capEl) capEl.textContent = formatMarketCap(info.marketCap);
     if (ctyEl) ctyEl.textContent = info.country || "";
     if (indEl) indEl.textContent = info.industry || "";
+    // Live‑only visual cues
+    applyLiveHighlights(cardEl, info);
   } catch {/* no-op */}
 }

@@ -14,3 +14,7 @@ logging:
   level: info
 persistence:
   state_file: "state.json"
+ui:
+  live_colors:
+    tiny_cap_max: 10000000            # Only change market-cap text color on live cards if below this USD threshold
+    industry_regex: "(medical|bio)"   # Regex (runtime enforced case-insensitive) to color industry text on live cards

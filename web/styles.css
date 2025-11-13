@@ -16,6 +16,14 @@
   --link:#4da6ff;
   --link-hover:#80bfff;
   --form:#ffd36e;
+  /* Okabe–Ito colorblind‑safe palette (science‑based) */
+  --oi-orange:#E69F00;
+  --oi-skyblue:#56B4E9;
+  --oi-bluishgreen:#009E73;
+  --oi-yellow:#F0E442;
+  --oi-vermillion:#D55E00;
+  --oi-reddishpurple:#CC79A7;
+  --oi-blue:#0072B2;
 }
 :root { color-scheme: dark; }
 *{ box-sizing: border-box; }
@@ -177,6 +185,13 @@ button:hover{ filter:brightness(1.06); }
   background:#2a2212;
   border-color:#6b5d1a;
   color:#ffd36e;
+}
+/* Scalp type text (to the right of the star) */
+.left .scalpType{
+  font-size:12px;
+  font-weight:700;
+  color: var(--magenta);
+  text-transform: capitalize;
 }
 /* --- Info row (News + SEC) --- */
 .infoRow{
@@ -376,4 +391,12 @@ td{ background:#121218; color:#cbd5e1; }
 .badge.phaseBadge {
   background: #0f172a;
   color: #38bdf8;
+}
+
+/* Live‑only highlights */
+.card.live .price .cap.isTinyCap{
+  color: var(--oi-vermillion);
+}
+.card.live .price .industry.isIndustryFlag{
+  color: var(--oi-skyblue);
 }

@@ -59,6 +59,12 @@ type AppConfig struct {
 	Persistence struct {
 		StateFile string `yaml:"state_file"`
 	} `yaml:"persistence"`
+	UI struct {
+		LiveColors struct {
+			TinyCapMax    float64 `yaml:"tiny_cap_max"`   // dollars; default 10_000_000
+			IndustryRegex string  `yaml:"industry_regex"` // default "(medical|bio)"
+		} `yaml:"live_colors"`
+	} `yaml:"ui"`
 }
 
 type WatchEntry struct {
@@ -1316,6 +1322,13 @@ func main() {
 	if strings.TrimSpace(cfg.Rvol.BucketSize) == "" { cfg.Rvol.BucketSize = "1m" }
 	if strings.TrimSpace(cfg.Rvol.DefaultMethod) == "" { cfg.Rvol.DefaultMethod = "A" }
 	if strings.TrimSpace(cfg.Rvol.BaselineMode) == "" { cfg.Rvol.BaselineMode = "single" }
+	// Defaults for UI/live highlights
+	if cfg.UI.LiveColors.TinyCapMax <= 0 {
+		cfg.UI.LiveColors.TinyCapMax = 10_000_000
+	}
+	if strings.TrimSpace(cfg.UI.LiveColors.IndustryRegex) == "" {
+		cfg.UI.LiveColors.IndustryRegex = "(medical|bio)"
+	}
 
 	var wl WatchlistFile
 	if err := loadYAML("watchlist.yaml", &wl); err != nil {
@@ -1579,6 +1592,7 @@ func main() {
 			Port                 int         `json:"port"`
 			MiniChartLookbackMin int         `json:"mini_chart_lookback_min"`
 			RVOL                 interface{} `json:"rvol"`
+			UI                   interface{} `json:"ui"`
 		}
 		out := resp{
 			Running:              streamCancel != nil,
@@ -1590,6 +1604,10 @@ func main() {
 				"method":        string(rvm.method),
 				"baseline_mode": rvm.baselineMode,
 				"active":        rvm.active,
+			},
+			UI: map[string]any{
+				"tiny_cap_max":   cfg.UI.LiveColors.TinyCapMax,
+				"industry_regex": cfg.UI.LiveColors.IndustryRegex,
 			},
 		}
 		rvm.mu.RLock()
