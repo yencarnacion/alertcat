@@ -180,7 +180,33 @@ function alertId(a){ return `${a.sym}_${a.ts_unix}_${a.kind}`; }
 function buildAlertCard(a, autoChart=false, isPinned=false, isLive=false) {
   const id = alertId(a);
   const card = document.createElement("div");
-  card.className = `card ${a.kind}${isPinned ? " isPinned" : ""}${isLive ? " live" : ""}`;
+  // Base classes
+  let classNames = ["card"];
+  if (isPinned) classNames.push("isPinned");
+  if (isLive) classNames.push("live");
+  // Map kind -> CSS classes
+  if (a.kind === "hod" || a.kind === "lod") {
+    classNames.push(a.kind);
+  } else if (typeof a.kind === "string" && a.kind.startsWith("scalp_")) {
+    // Expected formats: scalp_rubberband_setup, scalp_backside_trigger, etc.
+    const parts = a.kind.split("_"); // ["scalp","rubberband","setup"]
+    // Always mark as scalp for base styling
+    classNames.push("scalp");
+    if (parts.length >= 2) {
+      // kind: rubberband, rubberband_up, backside, fashionably_late
+      const coreKind = parts[1];
+      classNames.push(coreKind);
+    }
+    if (parts.length >= 3) {
+      // phase: setup/trigger
+      const phase = parts[parts.length - 1];
+      classNames.push(phase);
+    }
+  } else if (a.kind) {
+    // Fallback for any future kinds
+    classNames.push(a.kind);
+  }
+  card.className = classNames.join(" ");
   card.dataset.id = id;
   card.dataset.sym = a.sym;
   card.dataset.ts = String(a.ts_unix);
@@ -401,16 +427,29 @@ function renderAll(){
 }
 function addIncomingAlert(a){
   allAlerts.push(a);
-  // If it’s pinned (unlikely on first arrive), it will appear in pinned on next render.
-  if (shouldShow(a.kind) && !isPinnedId(alertId(a))) {
+  const isScalp = typeof a.kind === "string" && a.kind.startsWith("scalp_");
+  const visible = shouldShow(a.kind) && !isPinnedId(alertId(a));
+  if (visible) {
     const autoChart = true;
     const node = buildAlertCard(a, autoChart, false);
     feed.appendChild(node);
-    playSound();
+    if (!silent) {
+      if (isScalp) {
+        playScalpSound();
+      } else {
+        playSound();
+      }
+    }
     addLiveCard(a); // mirror to the live stream on the right
   } else {
-    // muted by filter or pinned; still play sound for pinned
-    if (isPinnedId(alertId(a))) playSound();
+    // If it is pinned (very rare on first arrival) still honor sound
+    if (isPinnedId(alertId(a)) && !silent) {
+      if (isScalp) {
+        playScalpSound();
+      } else {
+        playSound();
+      }
+    }
   }
 }
 // NEW: Render recent RVOL alerts (group by minute, sort per minute)
