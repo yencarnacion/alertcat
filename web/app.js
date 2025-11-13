@@ -161,9 +161,18 @@ function getParam(name){
 function shouldShow(kind){
   const hodOn = !!chkHod?.checked;
   const lodOn = !!chkLod?.checked;
-  if (!hodOn && !lodOn) return false;
+  const scalpsOn = !!chkScalps?.checked;
+
+  // HOD/LOD filters
   if (kind === "hod") return hodOn;
   if (kind === "lod") return lodOn;
+
+  // Scalp alerts: any kind starting with "scalp_"
+  if (kind && kind.startsWith("scalp_")) {
+    return scalpsOn;
+  }
+
+  // Unknown kinds: hide by default
   return false;
 }
 function alertId(a){ return `${a.sym}_${a.ts_unix}_${a.kind}`; }
@@ -808,10 +817,10 @@ function connectWS() {
         return;
       }
       if (msg.type === "scalp_alert") {
-        if (chkScalps && !chkScalps.checked) {
-          return;
-        }
-        handleScalpAlert(msg);
+        // Visuals are handled via mirrored generic alerts ("alert" with kind "scalp_*").
+        // Respect the scalps toggle for sound as well.
+        if (chkScalps && !chkScalps.checked) return;
+        if (!silent) playScalpSound();
         return;
       }
     } catch {}
@@ -1029,45 +1038,7 @@ function stopAllSounds() {
   // Placeholder for stopping sounds if needed
 }
 
-// Simple scalp alerts log (top-right live panel, reusing liveFeed styling).
-function handleScalpAlert(msg) {
-  const live = document.getElementById("live");
-  if (!live) {
-    if (!silent) playScalpSound();
-    return;
-  }
-  const card = document.createElement("div");
-  card.className = `card live scalp ${msg.kind} ${msg.phase}`;
-  const phaseLabel = msg.phase === "trigger" ? "TRIGGER" : "SETUP";
-  const kindLabel = msg.kind === "rubberband"
-    ? "Rubberband Down"
-    : msg.kind === "rubberband_up"
-    ? "Rubberband Up"
-    : msg.kind === "backside"
-    ? "Backside"
-    : "Fashionably Late";
-  const priceTxt = typeof msg.price === "number"
-    ? "$" + Number(msg.price).toFixed(3).replace(/\.?0+$/, "")
-    : "";
-  card.innerHTML = `
-    <div class="left">
-      <span class="badge scalpBadge">${kindLabel}</span>
-      <span class="badge phaseBadge">${phaseLabel}</span>
-      <span class="sym">${msg.sym}</span>
-    </div>
-    <div class="price"><span class="pv">${priceTxt}</span></div>
-    <div class="time">${msg.time || ""}</div>
-    <div class="infoRow">
-      <div class="infoCol">
-        <div class="sectionTitle">Scalp</div>
-        <div class="muted">${(msg.info || "").replace(/</g,"&lt;")}</div>
-      </div>
-    </div>
-  `;
-  live.prepend(card);
-  trimLive();
-  if (!silent) playScalpSound();
-}
+// Removed custom scalp live card: live visuals come from mirrored generic alerts ("alert" with kind "scalp_*").
 
 // =======================
 // FMP profile helpers

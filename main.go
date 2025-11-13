@@ -129,7 +129,7 @@ type statusMsg struct {
 
 type alertMsg struct {
 	Type   string  `json:"type"`   // "alert"
-	Kind   string  `json:"kind"`   // "lod" | "hod"
+	Kind   string  `json:"kind"`   // "lod" | "hod" | scalp_* (mirrored scalps, e.g. "scalp_rubberband_setup")
 	Time   string  `json:"time"`   // "HH:MM:SS ET"
 	Sym    string  `json:"sym"`
 	Name   string  `json:"name,omitempty"`
@@ -1426,7 +1426,8 @@ func main() {
 					barEnd := time.Unix(0, am.E*int64(time.Millisecond)).In(et)
 					alerts := sdet.OnBar(sym, barEnd, am.O, am.H, am.L, am.C, am.V)
 					for _, a := range alerts {
-						msg := scalpAlertMsg{
+						// Live scalp message (right column)
+						sMsg := scalpAlertMsg{
 							Type:  "scalp_alert",
 							Kind:  string(a.Kind),
 							Phase: string(a.Phase),
@@ -1435,7 +1436,25 @@ func main() {
 							Price: a.Price,
 							Info:  a.Info,
 						}
-						h.broadcast(msg)
+						h.broadcast(sMsg)
+
+						// Also expose as a generic alert so it shows in the left feed
+						// Use distinct kind strings so CSS/treatment can differ from HOD/LOD.
+						kind := "scalp_" + string(a.Kind) + "_" + string(a.Phase) // e.g. "scalp_rubberband_setup"
+						// Use the actual bar end time (event time) for TSUnix to avoid collisions and ensure ordering.
+						ts := barEnd.UnixNano() / int64(time.Millisecond)
+
+						aMsg := alertMsg{
+							Type:   "alert",
+							Kind:   kind,
+							Time:   a.Time,
+							Sym:    a.Sym,
+							Name:   "",
+							Price:  a.Price,
+							TSUnix: ts,
+						}
+						h.addHistory(aMsg)
+						h.broadcast(aMsg)
 					}
                 case <-sub.Done():
                     return
