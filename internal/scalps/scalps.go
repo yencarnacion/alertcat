@@ -38,9 +38,10 @@ type Alert struct {
 
 // Config holds tunables; defaults chosen from user specs.
 type Config struct {
-	// VWAP bands as percents (e.g. 0.01, 0.02)
-	Band1Pct float64
-	Band2Pct float64
+	// VWAP bands are based on VWAP ± k * stddev of (typical price) from session start.
+	// These scalars are roughly aligned with common "1st/2nd band" settings.
+	Band1K float64 // e.g. 1.0
+	Band2K float64 // e.g. 2.0
 
 	// Rubberband
 	RbNetDropPct   float64 // e.g. 0.0075 (0.75%)
@@ -60,8 +61,8 @@ type Config struct {
 
 func DefaultConfig() Config {
 	return Config{
-		Band1Pct:           0.01,
-		Band2Pct:           0.02,
+		Band1K:             1.0,
+		Band2K:             2.0,
 		RbNetDropPct:       0.0075,
 		RbLookbackBars:     3,
 		RbVolMult:          2.0,
@@ -91,9 +92,14 @@ type symState struct {
 	// rolling history (recent 40+ bars is enough)
 	Bars []OneMinBar
 
-	// VWAP state
+	// VWAP state from session start, using typical price ((H+L+C)/3) * Vol
 	VwapSumPV float64
 	VwapSumV  float64
+
+	// For volume-weighted stddev bands:
+	// VWAP = sum(tp * Vol) / sum(Vol)
+	// Var_vw(tp) = sum(tp^2 * Vol) / sum(Vol) - VWAP^2
+	VwapSumTP2V float64 // sum(tp^2 * Vol)
 
 	// 18-SMA state
 	SmaSum   float64
@@ -116,11 +122,11 @@ func NewDetector(et *time.Location, cfg Config) *Detector {
 	if et == nil {
 		et = time.FixedZone("UTC", 0)
 	}
-	if cfg.Band1Pct <= 0 {
-		cfg.Band1Pct = 0.01
+	if cfg.Band1K <= 0 {
+		cfg.Band1K = 1.0
 	}
-	if cfg.Band2Pct <= 0 {
-		cfg.Band2Pct = 0.02
+	if cfg.Band2K <= 0 {
+		cfg.Band2K = 2.0
 	}
 	if cfg.SmaPeriod <= 0 {
 		cfg.SmaPeriod = 18
@@ -172,12 +178,16 @@ func (d *Detector) SeedVWAP(sym string, bars []OneMinBar) {
 		}
 		b.Time = bt
 		s.Bars = append(s.Bars, b)
-		// VWAP from session start: sum over all seeded bars
+		// Typical price
+		tp := (b.High + b.Low + b.Close) / 3.0
+		// VWAP: sum(tp * Vol) / sum(Vol)
 		if b.Vol > 0 {
-			s.VwapSumPV += b.Close * b.Vol
+			s.VwapSumPV += tp * b.Vol
 			s.VwapSumV += b.Vol
+			// For volume-weighted stddev bands
+			s.VwapSumTP2V += tp * tp * b.Vol
 		}
-		// SMA18 running sum
+		// SMA18 running sum of closes
 		s.SmaSum += b.Close
 		if len(s.Bars) > d.cfg.SmaPeriod {
 			s.SmaSum -= s.Bars[len(s.Bars)-1-d.cfg.SmaPeriod].Close
@@ -186,14 +196,12 @@ func (d *Detector) SeedVWAP(sym string, bars []OneMinBar) {
 
 	// Initialize PrevSMA/PrevVWAP to last seeded values so first live bar cross is correct.
 	if len(s.Bars) > 0 {
-		last := s.Bars[len(s.Bars)-1]
 		if s.VwapSumV > 0 {
 			s.PrevVWAP = s.VwapSumPV / s.VwapSumV
 		}
 		if len(s.Bars) >= d.cfg.SmaPeriod {
 			s.PrevSMA = s.SmaSum / float64(d.cfg.SmaPeriod)
 		}
-		_ = last // kept for clarity; no extra fields needed.
 	}
 }
 
@@ -218,11 +226,17 @@ func (d *Detector) OnBar(sym string, t time.Time, o, h, l, c, v float64) []Alert
 		s.Bars = s.Bars[len(s.Bars)-400:]
 	}
 
-	// Update VWAP
+	// Typical price for this bar
+	tp := (h + l + c) / 3.0
+
+	// Update VWAP from session start
 	if v > 0 {
-		s.VwapSumPV += c * v
+		s.VwapSumPV += tp * v
 		s.VwapSumV += v
+		// Update weighted tp^2 sum for stddev
+		s.VwapSumTP2V += tp * tp * v
 	}
+
 	var vwap float64
 	if s.VwapSumV > 0 {
 		vwap = s.VwapSumPV / s.VwapSumV
@@ -289,15 +303,49 @@ func (d *Detector) medianVolLastN(bars []OneMinBar, n int) float64 {
 	return 0.5 * (tmp[n/2-1] + tmp[n/2])
 }
 
+func (s *symState) bands(cfg Config) (vwap, band1Lower, band2Lower float64) {
+	if s.VwapSumV <= 0 {
+		return 0, 0, 0
+	}
+	vwap = s.VwapSumPV / s.VwapSumV
+
+	// volume-weighted variance of typical price
+	meanTP2 := s.VwapSumTP2V / s.VwapSumV
+	variance := meanTP2 - vwap*vwap
+	if variance < 0 {
+		variance = 0
+	}
+	std := math.Sqrt(variance)
+	if std == 0 {
+		return vwap, 0, 0
+	}
+
+	k1 := cfg.Band1K
+	if k1 <= 0 {
+		k1 = 1.0
+	}
+	k2 := cfg.Band2K
+	if k2 <= 0 {
+		k2 = 2.0
+	}
+
+	band1Lower = vwap - k1*std
+	band2Lower = vwap - k2*std
+	return
+}
+
 /* ===== Rubberband ===== */
 
 func (d *Detector) detectRubberband(s *symState, bar OneMinBar, vwap float64) (alerts []Alert, capitulation bool) {
 	if vwap <= 0 || len(s.Bars) < d.cfg.RbLookbackBars+1 {
 		return
 	}
-	// Location: between Band2 and Band1 below VWAP, closer to Band2.
-	b1 := vwap * (1 - d.cfg.Band1Pct)
-	b2 := vwap * (1 - d.cfg.Band2Pct)
+	// Use std-dev bands derived from VWAP based on typical price history
+	v, b1, b2 := s.bands(d.cfg)
+	if v <= 0 || b1 == 0 || b2 == 0 {
+		// insufficient history for bands
+		return
+	}
 	c := bar.Close
 	if c < b2 || c > b1 {
 		// not in the desired stretch zone
