@@ -351,3 +351,27 @@ td{ background:#121218; color:#cbd5e1; }
 }
 .delta.pos { color: var(--green); }
 .delta.neg { color: var(--red); }
+
+/* Scalp-specific styling */
+.card.scalp {
+  border-color: var(--blue);
+}
+.card.scalp.rubberband { border-color: var(--red); }
+.card.scalp.backside { border-color: var(--yellow); }
+.card.scalp.fashionably_late { border-color: var(--green); }
+
+.card.scalp.setup {
+  box-shadow: 0 0 0 1px rgba(148, 163, 253, 0.4) inset;
+}
+.card.scalp.trigger {
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.9) inset;
+}
+
+.badge.scalpBadge {
+  background: #1d2438;
+  color: #9fb4ff;
+}
+.badge.phaseBadge {
+  background: #0f172a;
+  color: #38bdf8;
+}

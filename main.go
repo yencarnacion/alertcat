@@ -30,6 +30,7 @@ import (
 	"alertcat/internal/alerts"
 	poly "alertcat/internal/polygon"
 	rvolpkg "alertcat/internal/rvol"
+	"alertcat/internal/scalps"
 )
 
 /* ====================
@@ -40,6 +41,7 @@ type AppConfig struct {
 	ServerPort int `yaml:"server_port"`
 	Alert      struct {
 		SoundFile       string `yaml:"sound_file"`
+		ScalpSoundFile  string `yaml:"scalp_sound_file"`
 		EnableSound     bool   `yaml:"enable_sound"`
 		CooldownSeconds int    `yaml:"cooldown_seconds"`
 	} `yaml:"alert"`
@@ -155,6 +157,16 @@ type rvolAlertMsg struct {
 type rvolHistoryMsg struct {
 	Type   string         `json:"type"` // "rvol_history"
 	Alerts []rvolAlertMsg `json:"alerts"`
+}
+
+type scalpAlertMsg struct {
+	Type  string  `json:"type"`  // "scalp_alert"
+	Kind  string  `json:"kind"`  // "rubberband" | "backside" | "fashionably_late"
+	Phase string  `json:"phase"` // "setup" | "trigger"
+	Sym   string  `json:"sym"`
+	Time  string  `json:"time"`
+	Price float64 `json:"price"`
+	Info  string  `json:"info,omitempty"`
 }
 
 type controlMsg struct {
@@ -619,8 +631,8 @@ func maxInt(a, b int) int {
     return b
 }
 
-// serveStatic wires the static web UI and sound file.
-func serveStatic(mux *http.ServeMux, webDir string, soundPath string) {
+// serveStatic wires the static web UI and sound files.
+func serveStatic(mux *http.ServeMux, webDir string, soundPath string, scalpSoundPath string) {
     abs, _ := filepath.Abs(webDir)
     log.Printf("Serving static from %s", abs)
     // index (no-cache)
@@ -658,6 +670,27 @@ func serveStatic(mux *http.ServeMux, webDir string, soundPath string) {
         w.Header().Set("Cache-Control", "public, max-age=864000")
         _, _ = w.Write(cachedBeepWAV)
     })
+	// NEW: scalp alert sound
+	mux.HandleFunc("/scalp.mp3", func(w http.ResponseWriter, r *http.Request) {
+		if p := strings.TrimSpace(scalpSoundPath); p != "" {
+			if st, err := os.Stat(p); err == nil && !st.IsDir() {
+				w.Header().Set("Cache-Control", "public, max-age=864000")
+				lp := strings.ToLower(p)
+				if strings.HasSuffix(lp, ".mp3") {
+					w.Header().Set("Content-Type", "audio/mpeg")
+				}
+				http.ServeFile(w, r, p)
+				return
+			}
+		}
+		// fallback to same as /alert.mp3
+		if cachedBeepWAV == nil {
+			cachedBeepWAV = synthBeepWAV(400, 880.0, 44100)
+		}
+		w.Header().Set("Content-Type", "audio/wav")
+		w.Header().Set("Cache-Control", "public, max-age=864000")
+		_, _ = w.Write(cachedBeepWAV)
+	})
 }
 func (m *rvolManager) setSession(date time.Time, sess SessionType) {
 	m.mu.Lock()
@@ -1169,6 +1202,88 @@ func seedSessionHiLo(et *time.Location, polygonKey string, symbols []string, nam
     wg.Wait()
 }
 
+// seedScalpVWAP backfills 1m bars from session start to nowET (bounded by sessEndET)
+// and seeds the scalp detector so its VWAP/SMA are correct even when starting mid-session.
+func seedScalpVWAP(
+	et *time.Location,
+	polygonKey string,
+	symbols []string,
+	sessStartET, nowET, sessEndET time.Time,
+	sdet *scalps.Detector,
+) {
+	if sdet == nil {
+		return
+	}
+	// Bound nowET inside session
+	if nowET.After(sessEndET) {
+		nowET = sessEndET
+	}
+	if !sessStartET.Before(nowET) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	rest := polygonrest.NewWithClient(polygonKey, httpClient)
+
+	maxParallel := 5
+	sem := make(chan struct{}, maxParallel)
+	var wg sync.WaitGroup
+
+	for _, sym := range symbols {
+		sym := sym
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			params := &rmodels.ListAggsParams{
+				Ticker:     sym,
+				Timespan:   rmodels.Minute,
+				Multiplier: 1,
+				From:       rmodels.Millis(sessStartET),
+				// exclusive upper bound; add 1 min to include current minute bar if exists
+				To: rmodels.Millis(nowET.Add(1 * time.Minute)),
+			}
+			lim := 50000
+			asc := rmodels.Asc
+			adj := true
+			params.Limit = &lim
+			params.Order = &asc
+			params.Adjusted = &adj
+
+			iter := rest.ListAggs(ctx, params)
+			var bars []scalps.OneMinBar
+			for iter.Next() {
+				a := iter.Item()
+				ts := time.Time(a.Timestamp).In(et)
+				if ts.Before(sessStartET) || ts.After(sessEndET) {
+					continue
+				}
+				// We treat each Agg as a completed 1m bar ending at ts.
+				bars = append(bars, scalps.OneMinBar{
+					Time:  ts,
+					Open:  a.Open,
+					High:  a.High,
+					Low:   a.Low,
+					Close: a.Close,
+					Vol:   a.Volume,
+				})
+			}
+			if err := iter.Err(); err != nil {
+				log.Printf("[seed scalps] %s: %v", sym, err)
+				return
+			}
+			if len(bars) == 0 {
+				return
+			}
+			sdet.SeedVWAP(sym, bars)
+		}()
+	}
+	wg.Wait()
+}
+
 /* ====================
    main
    ==================== */
@@ -1223,6 +1338,10 @@ func main() {
 
 	et := mustET(cfg.Timezone)
 
+	// Scalp detector
+	scalpCfg := scalps.DefaultConfig()
+	sdet := scalps.NewDetector(et, scalpCfg)
+
 	// Hub + WS server (with RVOL control handling)
 	h := newHub(500)
 
@@ -1231,7 +1350,9 @@ func main() {
 
 	// web mux
 	mux := http.NewServeMux()
-	serveStatic(mux, "web", normalizedSoundPath(cfg.Alert.SoundFile))
+	serveStatic(mux, "web",
+		normalizedSoundPath(cfg.Alert.SoundFile),
+		normalizedSoundPath(cfg.Alert.ScalpSoundFile))
 	mux.HandleFunc("/ws", h.serveWS(func(cl *client, ctrl controlMsg) {
 		switch strings.ToLower(ctrl.Action) {
 		case "set_rvol_threshold":
@@ -1301,6 +1422,21 @@ func main() {
                         if p, ok2 := v.(float64); ok2 { lp = p }
                     }
                     rvm.OnAM(sym, am, lp)
+					// Scalp detector: feed completed 1m bar.
+					barEnd := time.Unix(0, am.E*int64(time.Millisecond)).In(et)
+					alerts := sdet.OnBar(sym, barEnd, am.O, am.H, am.L, am.C, am.V)
+					for _, a := range alerts {
+						msg := scalpAlertMsg{
+							Type:  "scalp_alert",
+							Kind:  string(a.Kind),
+							Phase: string(a.Phase),
+							Sym:   a.Sym,
+							Time:  a.Time,
+							Price: a.Price,
+							Info:  a.Info,
+						}
+						h.broadcast(msg)
+					}
                 case <-sub.Done():
                     return
                 case <-ctx.Done():
@@ -1380,6 +1516,10 @@ func main() {
 			// Seed HOD/LOD from session start (04:06/09:30/16:06 ET) up to now so alerts reflect the true session range,
 			// not "since program start".
 			seedSessionHiLo(et, polygonKey, symbols, nameBySymbol, odStartET, time.Now().In(et), endET, eng)
+
+			// Set scalp session start and seed VWAP/SMA from session start so we are correct mid-session.
+			sdet.SetSessionStart(startET)
+			seedScalpVWAP(et, polygonKey, symbols, startET, time.Now().In(et), endET, sdet)
 
 			// RVOL
 			rvm.setSession(dt, sess)

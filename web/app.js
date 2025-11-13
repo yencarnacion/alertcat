@@ -13,6 +13,7 @@ const btnReloadWL = document.getElementById("btnReloadWl"); // NEW
 const chkHod = document.getElementById("chkHod");
 const chkLod = document.getElementById("chkLod");
 const chkCompact = document.getElementById("chkCompact"); // NEW
+const chkScalps = document.getElementById("chkScalps");
 // NEW RVOL controls
 const rvolThreshold = document.getElementById("rvolThreshold");
 const rvolMethod = document.getElementById("rvolMethod");
@@ -35,6 +36,7 @@ const pinnedCountEl = document.getElementById("pinnedCount");
 let ws = null;
 let audioCtx = null;
 let audioBuf = null;
+let scalpAudioBuf = null;
 let soundEnabled = true; // default: Sound ON
 let paused = false;
 let historyLoaded = false;
@@ -42,6 +44,9 @@ let allAlerts = []; // [{kind:"lod"|"hod", sym, name, price, time, ts_unix}]
 let recentAlerts = []; // for RVOL [{time, symbol, price, volume, baseline, rvol, method}]
 let silent = false;
 let sessionDateET = ""; // YYYY-MM-DD (from /api/status)
+const scalpAudio = document.createElement("audio");
+scalpAudio.src = "/scalp.mp3";
+scalpAudio.preload = "auto";
 // ---- FMP profile cache (in this browser for the day) ----
 const profileCache = new Map(); // sym -> { marketCap:number, country:string, industry:string }
 // --- Mini chart management ---
@@ -99,6 +104,12 @@ async function loadSound() {
     const resp = await fetch("/alert.mp3", { cache: "force-cache" });
     const arr = await resp.arrayBuffer();
     audioBuf = await audioCtx.decodeAudioData(arr);
+    // scalp sound (best-effort)
+    try {
+      const rs = await fetch("/scalp.mp3", { cache: "force-cache" });
+      const ra = await rs.arrayBuffer();
+      scalpAudioBuf = await audioCtx.decodeAudioData(ra);
+    } catch {}
     return true;
   } catch { return false; }
 }
@@ -119,6 +130,20 @@ function playSound() {
     } catch {}
   }
   try { fallbackAudio.currentTime = 0; fallbackAudio.play(); } catch {}
+}
+function playScalpSound() {
+  if (!soundEnabled || silent) return;
+  if (audioCtx && scalpAudioBuf) {
+    try {
+      const src = audioCtx.createBufferSource();
+      src.buffer = scalpAudioBuf;
+      src.connect(audioCtx.destination);
+      src.start();
+      return;
+    } catch {}
+  }
+  // fallback
+  try { scalpAudio.currentTime = 0; scalpAudio.play(); } catch {}
 }
 function todayISO() {
   const d = new Date();
@@ -782,6 +807,13 @@ function connectWS() {
         addRvolAlert(msg);
         return;
       }
+      if (msg.type === "scalp_alert") {
+        if (chkScalps && !chkScalps.checked) {
+          return;
+        }
+        handleScalpAlert(msg);
+        return;
+      }
     } catch {}
   };
 }
@@ -995,6 +1027,44 @@ function initCompact(){
 
 function stopAllSounds() {
   // Placeholder for stopping sounds if needed
+}
+
+// Simple scalp alerts log (top-right live panel, reusing liveFeed styling).
+function handleScalpAlert(msg) {
+  const live = document.getElementById("live");
+  if (!live) {
+    if (!silent) playScalpSound();
+    return;
+  }
+  const card = document.createElement("div");
+  card.className = `card live scalp ${msg.kind} ${msg.phase}`;
+  const phaseLabel = msg.phase === "trigger" ? "TRIGGER" : "SETUP";
+  const kindLabel = msg.kind === "rubberband"
+    ? "Rubberband"
+    : msg.kind === "backside"
+    ? "Backside"
+    : "Fashionably Late";
+  const priceTxt = typeof msg.price === "number"
+    ? "$" + Number(msg.price).toFixed(3).replace(/\.?0+$/, "")
+    : "";
+  card.innerHTML = `
+    <div class="left">
+      <span class="badge scalpBadge">${kindLabel}</span>
+      <span class="badge phaseBadge">${phaseLabel}</span>
+      <span class="sym">${msg.sym}</span>
+    </div>
+    <div class="price"><span class="pv">${priceTxt}</span></div>
+    <div class="time">${msg.time || ""}</div>
+    <div class="infoRow">
+      <div class="infoCol">
+        <div class="sectionTitle">Scalp</div>
+        <div class="muted">${(msg.info || "").replace(/</g,"&lt;")}</div>
+      </div>
+    </div>
+  `;
+  live.prepend(card);
+  trimLive();
+  if (!silent) playScalpSound();
 }
 
 // =======================
