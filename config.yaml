@@ -1,6 +1,14 @@
 server_port: 8089
 alert:
+  # Optional legacy single sound (used as fallback if up/down not set)
   sound_file: "./web/sounds/hey.mp3"
+
+  # NEW: directional sounds
+  up_sound_file: "./web/sounds/alert_up.mp3"
+  down_sound_file: "./web/sounds/alert_down.mp3"
+
+  scalp_sound_file: "./web/sounds/scalp.mp3"  # optional; already supported
+
   enable_sound: true
   cooldown_seconds: 10
 rvol:

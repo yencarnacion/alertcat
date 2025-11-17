@@ -3,7 +3,10 @@ const feed = document.getElementById("feed");
 const liveFeed = document.getElementById("live"); // NEW: right column live stream
 const soundBtn = document.getElementById("soundBtn");
 const soundState = document.getElementById("soundState");
-const fallbackAudio = document.getElementById("alertAudio");
+
+// Separate fallbacks for up/down
+const fallbackAudioUp = document.getElementById("alertAudioUp");
+const fallbackAudioDown = document.getElementById("alertAudioDown");
 const dateInput = document.getElementById("dateInput");
 const btnStart = document.getElementById("btnStart");
 const btnStop = document.getElementById("btnStop");
@@ -35,7 +38,8 @@ const btnUnpinAll = document.getElementById("btnUnpinAll");
 const pinnedCountEl = document.getElementById("pinnedCount");
 let ws = null;
 let audioCtx = null;
-let audioBuf = null;
+let audioBufUp = null;
+let audioBufDown = null;
 let scalpAudioBuf = null;
 let soundEnabled = true; // default: Sound ON
 let paused = false;
@@ -115,35 +119,78 @@ async function loadSound() {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return false;
     audioCtx = new AC();
-    const resp = await fetch("/alert.mp3", { cache: "force-cache" });
-    const arr = await resp.arrayBuffer();
-    audioBuf = await audioCtx.decodeAudioData(arr);
-    // scalp sound (best-effort)
+
+    // Load UP and DOWN alert sounds (server: /alert.mp3 is "up", /alert-down.mp3 is "down")
+    const [upResp, downResp] = await Promise.all([
+      fetch("/alert.mp3", { cache: "force-cache" }),         // UP
+      fetch("/alert-down.mp3", { cache: "force-cache" }),    // DOWN
+    ]);
+
+    const upArr = await upResp.arrayBuffer();
+    audioBufUp = await audioCtx.decodeAudioData(upArr);
+
+    const downArr = await downResp.arrayBuffer();
+    audioBufDown = await audioCtx.decodeAudioData(downArr);
+
+    // Scalp sound (best-effort)
     try {
       const rs = await fetch("/scalp.mp3", { cache: "force-cache" });
       const ra = await rs.arrayBuffer();
       scalpAudioBuf = await audioCtx.decodeAudioData(ra);
     } catch {}
+
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 async function enableSound() {
-  if (!audioCtx || audioCtx.state === "suspended") { try { await audioCtx.resume(); } catch {} }
+  if (!audioCtx || audioCtx.state === "suspended") {
+    try { await audioCtx.resume(); } catch {}
+  }
   soundEnabled = true;
   soundState.textContent = "Sound ON";
 }
-function playSound() {
+
+function playUpSound() {
   if (!soundEnabled || silent) return;
-  if (audioCtx && audioBuf) {
+
+  if (audioCtx && audioBufUp) {
     try {
       const src = audioCtx.createBufferSource();
-      src.buffer = audioBuf;
+      src.buffer = audioBufUp;
       src.connect(audioCtx.destination);
       src.start();
       return;
     } catch {}
   }
-  try { fallbackAudio.currentTime = 0; fallbackAudio.play(); } catch {}
+  // Fallback <audio> element
+  if (fallbackAudioUp) {
+    try { fallbackAudioUp.currentTime = 0; fallbackAudioUp.play(); } catch {}
+  }
+}
+
+function playDownSound() {
+  if (!soundEnabled || silent) return;
+
+  if (audioCtx && audioBufDown) {
+    try {
+      const src = audioCtx.createBufferSource();
+      src.buffer = audioBufDown;
+      src.connect(audioCtx.destination);
+      src.start();
+      return;
+    } catch {}
+  }
+  // Fallback <audio> element
+  if (fallbackAudioDown) {
+    try { fallbackAudioDown.currentTime = 0; fallbackAudioDown.play(); } catch {}
+  }
+}
+
+// Maintain backward compatibility: generic "playSound" = "up"
+function playSound() {
+  playUpSound();
 }
 function playScalpSound() {
   if (!soundEnabled || silent) return;
@@ -462,21 +509,30 @@ function addIncomingAlert(a){
     const autoChart = true;
     const node = buildAlertCard(a, autoChart, false);
     feed.appendChild(node);
+
     if (!silent) {
       if (isScalp) {
+        // scalps keep their own distinct sound
         playScalpSound();
+      } else if (a.kind === "lod") {
+        // price making a new LOD → DOWN sound
+        playDownSound();
       } else {
-        playSound();
+        // HOD (and any other non-scalp alerts) → UP sound
+        playUpSound();
       }
     }
+
     addLiveCard(a); // mirror to the live stream on the right
   } else {
     // If it is pinned (very rare on first arrival) still honor sound
     if (isPinnedId(alertId(a)) && !silent) {
       if (isScalp) {
         playScalpSound();
+      } else if (a.kind === "lod") {
+        playDownSound();
       } else {
-        playSound();
+        playUpSound();
       }
     }
   }
@@ -589,7 +645,15 @@ function addRvolAlert(msg) {
   });
   if (recentAlerts.length > 200) recentAlerts.shift();
   renderRecentAlerts();
-  if (!silent) playSound();
+
+  if (!silent) {
+    // Directional RVOL sounds: up for green (or flat), down for red
+    if (typeof msg.delta === "number" && !Number.isNaN(msg.delta) && msg.delta < 0) {
+      playDownSound();
+    } else {
+      playUpSound();
+    }
+  }
 }
 // ----------------- Mini charts -----------------
 async function ensureUnderLimitThenSpawn(id, sym) {

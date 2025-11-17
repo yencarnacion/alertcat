@@ -40,8 +40,10 @@ import (
 type AppConfig struct {
 	ServerPort int `yaml:"server_port"`
 	Alert      struct {
-		SoundFile       string `yaml:"sound_file"`
-		ScalpSoundFile  string `yaml:"scalp_sound_file"`
+		SoundFile       string `yaml:"sound_file"`        // legacy / fallback
+		ScalpSoundFile  string `yaml:"scalp_sound_file"`  // existing
+		UpSoundFile     string `yaml:"up_sound_file"`     // NEW
+		DownSoundFile   string `yaml:"down_sound_file"`   // NEW
 		EnableSound     bool   `yaml:"enable_sound"`
 		CooldownSeconds int    `yaml:"cooldown_seconds"`
 	} `yaml:"alert"`
@@ -638,47 +640,29 @@ func maxInt(a, b int) int {
 }
 
 // serveStatic wires the static web UI and sound files.
-func serveStatic(mux *http.ServeMux, webDir string, soundPath string, scalpSoundPath string) {
-    abs, _ := filepath.Abs(webDir)
-    log.Printf("Serving static from %s", abs)
-    // index (no-cache)
-    mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Cache-Control", "no-cache")
-        http.ServeFile(w, r, filepath.Join(webDir, "index.html"))
-    })
-    // assets (cacheable)
-    fs := http.FileServer(http.Dir(webDir))
-    mux.Handle("/assets/", http.StripPrefix("/assets/", fs))
-    // news page
-    mux.HandleFunc("/news.html", func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Cache-Control", "no-cache")
-        http.ServeFile(w, r, filepath.Join(webDir, "news.html"))
-    })
-    // audio
-    mux.HandleFunc("/alert.mp3", func(w http.ResponseWriter, r *http.Request) {
-        // Serve configured file if present, else an in-memory WAV beep (extension still /alert.mp3).
-        if p := strings.TrimSpace(soundPath); p != "" {
-            if st, err := os.Stat(p); err == nil && !st.IsDir() {
-                w.Header().Set("Cache-Control", "public, max-age=864000")
-                // Set appropriate Content-Type when we serve a real MP3 file
-                lp := strings.ToLower(p)
-                if strings.HasSuffix(lp, ".mp3") {
-                    w.Header().Set("Content-Type", "audio/mpeg")
-                }
-                http.ServeFile(w, r, p)
-                return
-            }
-        }
-        if cachedBeepWAV == nil {
-            cachedBeepWAV = synthBeepWAV(400, 880.0, 44100)
-        }
-        w.Header().Set("Content-Type", "audio/wav")
-        w.Header().Set("Cache-Control", "public, max-age=864000")
-        _, _ = w.Write(cachedBeepWAV)
-    })
-	// NEW: scalp alert sound
-	mux.HandleFunc("/scalp.mp3", func(w http.ResponseWriter, r *http.Request) {
-		if p := strings.TrimSpace(scalpSoundPath); p != "" {
+func serveStatic(mux *http.ServeMux, webDir string, upSoundPath string, downSoundPath string, scalpSoundPath string) {
+	abs, _ := filepath.Abs(webDir)
+	log.Printf("Serving static from %s", abs)
+
+	// index (no-cache)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		http.ServeFile(w, r, filepath.Join(webDir, "index.html"))
+	})
+
+	// assets (cacheable)
+	fs := http.FileServer(http.Dir(webDir))
+	mux.Handle("/assets/", http.StripPrefix("/assets/", fs))
+
+	// news page
+	mux.HandleFunc("/news.html", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		http.ServeFile(w, r, filepath.Join(webDir, "news.html"))
+	})
+
+	// helper: serve an MP3 if present, else in-memory beep WAV
+	serveSoundFile := func(path string, w http.ResponseWriter, r *http.Request) {
+		if p := strings.TrimSpace(path); p != "" {
 			if st, err := os.Stat(p); err == nil && !st.IsDir() {
 				w.Header().Set("Cache-Control", "public, max-age=864000")
 				lp := strings.ToLower(p)
@@ -689,13 +673,33 @@ func serveStatic(mux *http.ServeMux, webDir string, soundPath string, scalpSound
 				return
 			}
 		}
-		// fallback to same as /alert.mp3
+		// fallback: simple beep
 		if cachedBeepWAV == nil {
 			cachedBeepWAV = synthBeepWAV(400, 880.0, 44100)
 		}
 		w.Header().Set("Content-Type", "audio/wav")
 		w.Header().Set("Cache-Control", "public, max-age=864000")
 		_, _ = w.Write(cachedBeepWAV)
+	}
+
+	// LEGACY: /alert.mp3 uses UP sound (backwards-compatible with old UI)
+	mux.HandleFunc("/alert.mp3", func(w http.ResponseWriter, r *http.Request) {
+		serveSoundFile(upSoundPath, w, r)
+	})
+
+	// NEW: explicit UP endpoint (UI will still use /alert.mp3, but this is handy if needed)
+	mux.HandleFunc("/alert-up.mp3", func(w http.ResponseWriter, r *http.Request) {
+		serveSoundFile(upSoundPath, w, r)
+	})
+
+	// NEW: DOWN endpoint
+	mux.HandleFunc("/alert-down.mp3", func(w http.ResponseWriter, r *http.Request) {
+		serveSoundFile(downSoundPath, w, r)
+	})
+
+	// Scalp alert sound (unchanged)
+	mux.HandleFunc("/scalp.mp3", func(w http.ResponseWriter, r *http.Request) {
+		serveSoundFile(scalpSoundPath, w, r)
 	})
 }
 func (m *rvolManager) setSession(date time.Time, sess SessionType) {
@@ -1363,9 +1367,28 @@ func main() {
 
 	// web mux
 	mux := http.NewServeMux()
-	serveStatic(mux, "web",
-		normalizedSoundPath(cfg.Alert.SoundFile),
-		normalizedSoundPath(cfg.Alert.ScalpSoundFile))
+
+	// Normalize and apply sensible fallbacks:
+	// - up_sound_file / down_sound_file win if set
+	// - otherwise they fall back to sound_file
+	baseSound := normalizedSoundPath(cfg.Alert.SoundFile)
+	upSound := normalizedSoundPath(cfg.Alert.UpSoundFile)
+	downSound := normalizedSoundPath(cfg.Alert.DownSoundFile)
+
+	if upSound == "" {
+		upSound = baseSound
+	}
+	if downSound == "" {
+		downSound = baseSound
+	}
+
+	serveStatic(
+		mux,
+		"web",
+		upSound,
+		downSound,
+		normalizedSoundPath(cfg.Alert.ScalpSoundFile),
+	)
 	mux.HandleFunc("/ws", h.serveWS(func(cl *client, ctrl controlMsg) {
 		switch strings.ToLower(ctrl.Action) {
 		case "set_rvol_threshold":
