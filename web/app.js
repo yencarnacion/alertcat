@@ -44,6 +44,7 @@ let scalpAudioBuf = null;
 let soundEnabled = true; // default: Sound ON
 let paused = false;
 let historyLoaded = false;
+const HISTORY_LIMIT = 500; // Hard cap on stored alerts to prevent Chrome crash
 let allAlerts = []; // [{kind:"lod"|"hod", sym, name, price, time, ts_unix}]
 let recentAlerts = []; // for RVOL [{time, symbol, price, volume, baseline, rvol, method}]
 let silent = false;
@@ -503,12 +504,31 @@ function renderAll(){
 }
 function addIncomingAlert(a){
   allAlerts.push(a);
+  // Prevent infinite memory growth in array
+  if (allAlerts.length > HISTORY_LIMIT) {
+    allAlerts.shift();
+  }
+
   const isScalp = typeof a.kind === "string" && a.kind.startsWith("scalp_");
   const visible = shouldShow(a.kind) && !isPinnedId(alertId(a));
   if (visible) {
     const autoChart = true;
     const node = buildAlertCard(a, autoChart, false);
     feed.appendChild(node);
+
+    // Prevent infinite DOM growth (Memory Leak Fix)
+    while (feed.children.length > HISTORY_LIMIT) {
+      // In column-reverse flex, the first child in DOM is the oldest visual item
+      const toRemove = feed.firstElementChild;
+      if (toRemove) {
+        // CRITICAL: Destroy associated chart to stop setInterval/ResizeObserver leaks
+        const rmId = toRemove.dataset.id;
+        if (rmId && chartsById.has(rmId)) {
+          destroyChart(rmId);
+        }
+        toRemove.remove();
+      }
+    }
 
     if (!silent) {
       if (isScalp) {
