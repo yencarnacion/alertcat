@@ -23,6 +23,7 @@ logging:
 persistence:
   state_file: "state.json"
 ui:
+  chart_opener_base_url: "http://localhost:8081"  # Ticker click target base, used as: {base}/api/open-chart/{TICKER}/{YYYY-MM-DD}
   live_colors:
     tiny_cap_max: 10000000            # Only change market-cap text color on live cards if below this USD threshold
     industry_regex: "(medical|bio)"   # Regex (runtime enforced case-insensitive) to color industry text on live cards

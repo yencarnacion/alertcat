@@ -57,7 +57,8 @@ const profileCache = new Map(); // sym -> { marketCap:number, country:string, in
 // ---- UI config (from server via /api/status), with sane defaults ----
 let uiConfig = {
   tinyCapMax: 10_000_000,           // $10M
-  industryRegex: "(medical|bio)"    // case-insensitive at runtime
+  industryRegex: "(medical|bio)",   // case-insensitive at runtime
+  chartOpenerBaseURL: "http://localhost:8081"
 };
 let industryRe = null;
 function compileIndustryRegex(){
@@ -214,6 +215,20 @@ function todayISO() {
   const dd = String(d.getDate()).padStart(2,"0");
   return `${yyyy}-${mm}-${dd}`;
 }
+function getChartOpenerURL(sym) {
+  const ticker = String(sym || "").trim().toUpperCase();
+  if (!ticker) return "";
+  const date = sessionDateET || todayISO();
+  const base = String(uiConfig.chartOpenerBaseURL || "http://localhost:8081").trim().replace(/\/+$/g, "");
+  if (!base) return "";
+  return `${base}/api/open-chart/${encodeURIComponent(ticker)}/${encodeURIComponent(date)}`;
+}
+function tickerLinkHTML(sym) {
+  const ticker = String(sym || "").trim().toUpperCase();
+  const href = getChartOpenerURL(ticker);
+  if (!href) return escapeHTML(ticker);
+  return `<a class="tickerLink" href="${escapeHTML(href)}" target="_blank" rel="noopener">${escapeHTML(ticker)}</a>`;
+}
 function getParam(name){
   try {
     const u = new URL(location.href);
@@ -296,12 +311,13 @@ function buildAlertCard(a, autoChart=false, isPinned=false, isLive=false) {
   const scalpTxt = scalpTypeLabel(a.kind);
   const scalpHTML = scalpTxt ? `<span class="scalpType" title="Scalp type">${scalpTxt}</span>` : "";
   const sourceHTML = renderSourceTags(a);
+  const tickerHTML = tickerLinkHTML(a.sym);
   if (isLive) {
     // Live variant: no chart row, no "More news" link
     card.innerHTML = `
       <div class="left">
         <span class="badge">${label}</span>
-        <span class="sym">${a.sym}</span>
+        <span class="sym">${tickerHTML}</span>
         ${sourceHTML}
         <span class="name">${a.name || ""}</span>
         <button class="iconBtn pinBtn" title="Pin/Unpin" aria-pressed="${isPinned ? "true" : "false"}">${isPinned ? "★" : "☆"}</button>
@@ -330,7 +346,7 @@ function buildAlertCard(a, autoChart=false, isPinned=false, isLive=false) {
     card.innerHTML = `
       <div class="left">
         <span class="badge">${label}</span>
-        <span class="sym">${a.sym}</span>
+        <span class="sym">${tickerHTML}</span>
         ${sourceHTML}
         <span class="name">${a.name || ""}</span>
         <button class="iconBtn pinBtn" title="Pin/Unpin" aria-pressed="${isPinned ? "true" : "false"}">${isPinned ? "★" : "☆"}</button>
@@ -636,7 +652,7 @@ function renderRecentAlerts() {
 
       tr.innerHTML = `
         <td>${minuteStr}</td>
-        <td>${a.symbol}</td>
+        <td>${tickerLinkHTML(a.symbol)}</td>
         <td>${priceTxt}${deltaHTML}</td>
         <td>${a.volume}</td>
         <td>${Number(a.baseline).toFixed(0)}</td>
@@ -1040,6 +1056,9 @@ async function initStatus() {
       }
       if (typeof j.ui.industry_regex === "string" && j.ui.industry_regex.trim() !== "") {
         uiConfig.industryRegex = j.ui.industry_regex;
+      }
+      if (typeof j.ui.chart_opener_base_url === "string" && j.ui.chart_opener_base_url.trim() !== "") {
+        uiConfig.chartOpenerBaseURL = j.ui.chart_opener_base_url.trim();
       }
       compileIndustryRegex();
     }

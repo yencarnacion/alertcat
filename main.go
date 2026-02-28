@@ -62,7 +62,8 @@ type AppConfig struct {
 		StateFile string `yaml:"state_file"`
 	} `yaml:"persistence"`
 	UI struct {
-		LiveColors struct {
+		ChartOpenerBaseURL string `yaml:"chart_opener_base_url"` // default "http://localhost:8081"
+		LiveColors         struct {
 			TinyCapMax    float64 `yaml:"tiny_cap_max"`   // dollars; default 10_000_000
 			IndustryRegex string  `yaml:"industry_regex"` // default "(medical|bio)"
 		} `yaml:"live_colors"`
@@ -1566,6 +1567,10 @@ func main() {
 	if strings.TrimSpace(cfg.UI.LiveColors.IndustryRegex) == "" {
 		cfg.UI.LiveColors.IndustryRegex = "(medical|bio)"
 	}
+	cfg.UI.ChartOpenerBaseURL = strings.TrimSpace(cfg.UI.ChartOpenerBaseURL)
+	if cfg.UI.ChartOpenerBaseURL == "" {
+		cfg.UI.ChartOpenerBaseURL = "http://localhost:8081"
+	}
 
 	watchlistFiles := []string{"watchlist.yaml"}
 	if strings.TrimSpace(*watchlistsRaw) != "" {
@@ -1912,8 +1917,9 @@ func main() {
 				"active":        rvm.active,
 			},
 			UI: map[string]any{
-				"tiny_cap_max":   cfg.UI.LiveColors.TinyCapMax,
-				"industry_regex": cfg.UI.LiveColors.IndustryRegex,
+				"tiny_cap_max":          cfg.UI.LiveColors.TinyCapMax,
+				"industry_regex":        cfg.UI.LiveColors.IndustryRegex,
+				"chart_opener_base_url": cfg.UI.ChartOpenerBaseURL,
 			},
 		}
 		rvm.mu.RLock()
@@ -1926,6 +1932,8 @@ func main() {
 			out.Session = string(sess)
 			out.StartET = s0.Format("15:04")
 			out.EndET = e0.Format("15:04")
+		} else {
+			out.Date = time.Now().In(et).Format("2006-01-02")
 		}
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(out)
