@@ -14,6 +14,10 @@
 4. `make run`
 
 ## Usage
+- Default watchlist behavior: `go run .` (loads `watchlist.yaml`).
+- Optional multi-watchlist mode: `go run . -watchlists above-upper-band.yaml,below-upper-band.yaml`
+  - Tickers are merged across all provided files.
+  - Alert cards show source tags from filename stems (for example `below-upper-band.yaml` -> `below-upper-band`).
 - Open http://localhost:8089
 - Start monitoring with controls.
 - Session times: Pre‑market (04:00 ET), Regular (09:30 ET), **PM (16:00 ET)**.

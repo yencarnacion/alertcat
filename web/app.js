@@ -45,7 +45,7 @@ let soundEnabled = true; // default: Sound ON
 let paused = false;
 let historyLoaded = false;
 const HISTORY_LIMIT = 500; // Hard cap on stored alerts to prevent Chrome crash
-let allAlerts = []; // [{kind:"lod"|"hod", sym, name, price, time, ts_unix}]
+let allAlerts = []; // [{kind, sym, name, sources, price, time, ts_unix}]
 let recentAlerts = []; // for RVOL [{time, symbol, price, volume, baseline, rvol, method}]
 let silent = false;
 let sessionDateET = ""; // YYYY-MM-DD (from /api/status)
@@ -238,6 +238,12 @@ function shouldShow(kind){
   return false;
 }
 function alertId(a){ return `${a.sym}_${a.ts_unix}_${a.kind}`; }
+function renderSourceTags(alertObj){
+  const arr = Array.isArray(alertObj?.sources) ? alertObj.sources.filter(Boolean) : [];
+  if (arr.length === 0) return "";
+  const chips = arr.map(src => `<span class="srcTag">${escapeHTML(src)}</span>`).join("");
+  return `<span class="sourceWrap" title="Watchlist source">${chips}</span>`;
+}
 // ----------------- Build & render cards -----------------
 function scalpTypeLabel(kind){
   if (typeof kind !== "string" || !kind.startsWith("scalp_")) return "";
@@ -289,12 +295,14 @@ function buildAlertCard(a, autoChart=false, isPinned=false, isLive=false) {
   const priceFmt = Number(a.price).toFixed(4).replace(/\.?0+$/, '');
   const scalpTxt = scalpTypeLabel(a.kind);
   const scalpHTML = scalpTxt ? `<span class="scalpType" title="Scalp type">${scalpTxt}</span>` : "";
+  const sourceHTML = renderSourceTags(a);
   if (isLive) {
     // Live variant: no chart row, no "More news" link
     card.innerHTML = `
       <div class="left">
         <span class="badge">${label}</span>
         <span class="sym">${a.sym}</span>
+        ${sourceHTML}
         <span class="name">${a.name || ""}</span>
         <button class="iconBtn pinBtn" title="Pin/Unpin" aria-pressed="${isPinned ? "true" : "false"}">${isPinned ? "★" : "☆"}</button>
         ${scalpHTML}
@@ -323,6 +331,7 @@ function buildAlertCard(a, autoChart=false, isPinned=false, isLive=false) {
       <div class="left">
         <span class="badge">${label}</span>
         <span class="sym">${a.sym}</span>
+        ${sourceHTML}
         <span class="name">${a.name || ""}</span>
         <button class="iconBtn pinBtn" title="Pin/Unpin" aria-pressed="${isPinned ? "true" : "false"}">${isPinned ? "★" : "☆"}</button>
         ${scalpHTML}
@@ -1128,7 +1137,7 @@ function initCompact(){
   // Reload watchlist (NEW)
   if (btnReloadWL) {
     btnReloadWL.addEventListener("click", async () => {
-      await postJSON("/api/watchlist/reload", {}); // server reads watchlist.yaml
+      await postJSON("/api/watchlist/reload", {}); // server reloads active watchlist file set
     });
   }
   // Unpin all

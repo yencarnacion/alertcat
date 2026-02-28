@@ -131,6 +131,24 @@ button:hover{ filter:brightness(1.06); }
 .left{ grid-area:left; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
 .badge{ background:#2a2f3a; color:#cbd5e1; padding:4px 8px; border-radius:6px; font-size:12px; }
 .sym{ font-weight:800; font-size:16px; letter-spacing:.2px; }
+.sourceWrap{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  flex-wrap:wrap;
+}
+.srcTag{
+  display:inline-flex;
+  align-items:center;
+  border-radius:999px;
+  padding:1px 6px;
+  font-size:11px;
+  font-weight:800;
+  line-height:1.3;
+  color:#0d2217;
+  background:#8ce7b2;
+  border:1px solid #4fbd7d;
+}
 .name{ color:var(--muted); font-size:12px; max-width: 44ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .price{ grid-area:price; font-variant-numeric: tabular-nums; font-weight:800; font-size:16px; }
 .price{
@@ -294,6 +312,7 @@ body.compact .card{
 body.compact .left{ gap:8px; }
 body.compact .badge{ font-size:11px; padding:2px 6px; }
 body.compact .sym{ font-size:16px; }
+body.compact .srcTag{ font-size:10px; padding:1px 5px; }
 body.compact .name{ display:none; } /* save horizontal space */
 body.compact .price{ font-size:16px; }
 body.compact .price{ font-size: 12px; }
