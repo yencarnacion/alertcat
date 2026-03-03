@@ -13,10 +13,17 @@ const btnStop = document.getElementById("btnStop");
 const btnPause = document.getElementById("btnPause");
 const btnClear = document.getElementById("btnClear");
 const btnReloadWL = document.getElementById("btnReloadWl"); // NEW
+const btnApplyLive = document.getElementById("btnApplyLive");
 const chkHod = document.getElementById("chkHod");
 const chkLod = document.getElementById("chkLod");
+const chkLocalHigh = document.getElementById("chkLocalHigh");
+const chkLocalLow = document.getElementById("chkLocalLow");
 const chkCompact = document.getElementById("chkCompact"); // NEW
 const chkScalps = document.getElementById("chkScalps");
+const localTimeInput = document.getElementById("localTimeInput");
+const levelsModeRadios = document.querySelectorAll('input[name="levelsMode"]');
+const sessionQuickBtns = document.querySelectorAll(".sessionQuick");
+const localPresetBtns = document.querySelectorAll(".localPreset");
 // NEW RVOL controls
 const rvolThreshold = document.getElementById("rvolThreshold");
 const rvolMethod = document.getElementById("rvolMethod");
@@ -44,6 +51,7 @@ let scalpAudioBuf = null;
 let soundEnabled = true; // default: Sound ON
 let paused = false;
 let historyLoaded = false;
+let streamRunning = false;
 const HISTORY_LIMIT = 500; // Hard cap on stored alerts to prevent Chrome crash
 let allAlerts = []; // [{kind, sym, name, sources, price, time, ts_unix}]
 let recentAlerts = []; // for RVOL [{time, symbol, price, volume, baseline, rvol, method}]
@@ -215,6 +223,122 @@ function todayISO() {
   const dd = String(d.getDate()).padStart(2,"0");
   return `${yyyy}-${mm}-${dd}`;
 }
+function selectedSession() {
+  const sessEl = document.querySelector('input[name="session"]:checked');
+  return sessEl ? sessEl.value : "rth";
+}
+function selectedLevelsMode() {
+  const m = document.querySelector('input[name="levelsMode"]:checked');
+  return m ? m.value : "session";
+}
+function setLevelsMode(mode) {
+  const m = mode === "local" ? "local" : "session";
+  const el = document.querySelector(`input[name="levelsMode"][value="${m}"]`);
+  if (el) el.checked = true;
+  syncLevelsModeUI();
+}
+function syncLevelsModeUI() {
+  const mode = selectedLevelsMode();
+  const isSession = mode === "session";
+  if (chkHod) {
+    chkHod.disabled = !isSession;
+    if (!isSession) {
+      chkHod.checked = false;
+    } else if (!chkHod.checked && !chkLod?.checked) {
+      chkHod.checked = true;
+    }
+  }
+  if (chkLod) {
+    chkLod.disabled = !isSession;
+    if (!isSession) chkLod.checked = false;
+  }
+  if (chkLocalHigh) {
+    chkLocalHigh.disabled = isSession;
+    if (isSession) {
+      chkLocalHigh.checked = false;
+    } else if (!chkLocalHigh.checked && !chkLocalLow?.checked) {
+      chkLocalHigh.checked = true;
+      if (chkLocalLow) chkLocalLow.checked = true;
+    }
+  }
+  if (chkLocalLow) {
+    chkLocalLow.disabled = isSession;
+    if (isSession) chkLocalLow.checked = false;
+  }
+  renderAll();
+}
+function defaultLocalTimeForSession(session) {
+  if (session === "pre") return "04:06";
+  if (session === "pm") return "16:06";
+  return "09:30";
+}
+function normalizeHHMM(raw) {
+  const s = String(raw || "").trim();
+  if (!/^\d{2}:\d{2}$/.test(s)) return "";
+  const [h, m] = s.split(":").map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return "";
+  if (h < 0 || h > 23 || m < 0 || m > 59) return "";
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+function nowHHMMET() {
+  try {
+    const fmt = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "America/New_York",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    return normalizeHHMM(fmt.format(new Date())) || "09:30";
+  } catch {
+    return "09:30";
+  }
+}
+function parseHHMM(hhmm) {
+  const normalized = normalizeHHMM(hhmm);
+  if (!normalized) return null;
+  const [h, m] = normalized.split(":").map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return { h, m };
+}
+function halfHourStartET() {
+  const p = parseHHMM(nowHHMMET());
+  if (!p) return "09:30";
+  const mm = p.m >= 30 ? 30 : 0;
+  return `${String(p.h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+function hourStartET() {
+  const p = parseHHMM(nowHHMMET());
+  if (!p) return "09:00";
+  return `${String(p.h).padStart(2, "0")}:00`;
+}
+function currentLocalTimeInput() {
+  const session = selectedSession();
+  const normalized = normalizeHHMM(localTimeInput?.value || "");
+  if (normalized) return normalized;
+  const fallback = defaultLocalTimeForSession(session);
+  if (localTimeInput) localTimeInput.value = fallback;
+  return fallback;
+}
+async function applyLiveSettings() {
+  const date = (dateInput.value || sessionDateET || todayISO()).trim();
+  const session = selectedSession();
+  const levelsMode = selectedLevelsMode();
+  const localTime = currentLocalTimeInput();
+  const localEnabled = !!(chkLocalHigh?.checked || chkLocalLow?.checked);
+  sessionDateET = date;
+  if (!streamRunning) return;
+  const j = await postJSON("/api/stream", {
+    mode: "update",
+    date,
+    session,
+    levels_mode: levelsMode,
+    local_time: localTime,
+    local_enabled: localEnabled,
+  });
+  if (j?.ok) {
+    streamRunning = true;
+  }
+}
 function getChartOpenerURL(sym) {
   const ticker = String(sym || "").trim().toUpperCase();
   if (!ticker) return "";
@@ -238,11 +362,15 @@ function getParam(name){
 function shouldShow(kind){
   const hodOn = !!chkHod?.checked;
   const lodOn = !!chkLod?.checked;
+  const lhighOn = !!chkLocalHigh?.checked;
+  const llowOn = !!chkLocalLow?.checked;
   const scalpsOn = !!chkScalps?.checked;
 
   // HOD/LOD filters
   if (kind === "hod") return hodOn;
   if (kind === "lod") return lodOn;
+  if (kind === "lhigh") return lhighOn;
+  if (kind === "llow") return llowOn;
 
   // Scalp alerts: any kind starting with "scalp_"
   if (kind && kind.startsWith("scalp_")) {
@@ -279,7 +407,7 @@ function buildAlertCard(a, autoChart=false, isPinned=false, isLive=false) {
   if (isPinned) classNames.push("isPinned");
   if (isLive) classNames.push("live");
   // Map kind -> CSS classes
-  if (a.kind === "hod" || a.kind === "lod") {
+  if (a.kind === "hod" || a.kind === "lod" || a.kind === "lhigh" || a.kind === "llow") {
     classNames.push(a.kind);
   } else if (typeof a.kind === "string" && a.kind.startsWith("scalp_")) {
     // Expected formats: scalp_rubberband_setup, scalp_backside_trigger, etc.
@@ -306,7 +434,13 @@ function buildAlertCard(a, autoChart=false, isPinned=false, isLive=false) {
   card.dataset.ts = String(a.ts_unix);
   card.dataset.kind = a.kind;
   card.dataset.live = isLive ? "1" : "0";
-  const label = a.kind === "hod" ? "NEW HOD" : "NEW LOD";
+  const labelMap = {
+    hod: "NEW HOD",
+    lod: "NEW LOD",
+    lhigh: "LOCAL HIGH",
+    llow: "LOCAL LOW",
+  };
+  const label = labelMap[a.kind] || "ALERT";
   const priceFmt = Number(a.price).toFixed(4).replace(/\.?0+$/, '');
   const scalpTxt = scalpTypeLabel(a.kind);
   const scalpHTML = scalpTxt ? `<span class="scalpType" title="Scalp type">${scalpTxt}</span>` : "";
@@ -559,11 +693,11 @@ function addIncomingAlert(a){
       if (isScalp) {
         // scalps keep their own distinct sound
         playScalpSound();
-      } else if (a.kind === "lod") {
-        // price making a new LOD → DOWN sound
+      } else if (a.kind === "lod" || a.kind === "llow") {
+        // price making a new low → DOWN sound
         playDownSound();
       } else {
-        // HOD (and any other non-scalp alerts) → UP sound
+        // highs (and any other non-scalp alerts) → UP sound
         playUpSound();
       }
     }
@@ -574,7 +708,7 @@ function addIncomingAlert(a){
     if (isPinnedId(alertId(a)) && !silent) {
       if (isScalp) {
         playScalpSound();
-      } else if (a.kind === "lod") {
+      } else if (a.kind === "lod" || a.kind === "llow") {
         playDownSound();
       } else {
         playUpSound();
@@ -1019,6 +1153,7 @@ async function initStatus() {
   try {
     const res = await fetch("/api/status", { cache: "no-store" });
     const j = await res.json();
+    streamRunning = !!j?.running;
     if (typeof j?.mini_chart_lookback_min === 'number') {
       chartLookbackMin = j.mini_chart_lookback_min;
     }
@@ -1035,6 +1170,26 @@ async function initStatus() {
       setStatus(`${label} running on ${j.date}${suffix}`, true);
     } else {
       setStatus("Stopped");
+    }
+    if (j?.session) {
+      const radio = document.querySelector(`input[name="session"][value="${j.session}"]`);
+      if (radio) radio.checked = true;
+    }
+    if (j?.local) {
+      const mode = (j.local.levels_mode === "local") ? "local" : "session";
+      setLevelsMode(mode);
+      const t = normalizeHHMM(j.local.time || "");
+      if (t && localTimeInput) localTimeInput.value = t;
+      if (typeof j.local.enabled === "boolean") {
+        if (mode === "local") {
+          if (chkLocalHigh) chkLocalHigh.checked = j.local.enabled;
+          if (chkLocalLow) chkLocalLow.checked = j.local.enabled;
+        }
+      }
+    } else {
+      const fallback = defaultLocalTimeForSession(selectedSession());
+      if (localTimeInput && !normalizeHHMM(localTimeInput.value)) localTimeInput.value = fallback;
+      setLevelsMode("session");
     }
     // NEW: Sync RVOL settings
     if (j?.rvol) {
@@ -1105,13 +1260,24 @@ function initCompact(){
     chkCompact.addEventListener('change', (e) => setCompact(!!e.target.checked));
   }
   dateInput.value = todayISO();
+  syncLevelsModeUI();
   // Start
   btnStart.addEventListener("click", async () => {
     const date = (dateInput.value || "").trim();
     if (!date) return;
-    const sessEl = document.querySelector('input[name="session"]:checked');
-    const session = sessEl ? sessEl.value : "rth";
-    await postJSON("/api/stream", { mode: "start", date, session });
+    const session = selectedSession();
+    const levelsMode = selectedLevelsMode();
+    const localTime = currentLocalTimeInput();
+    const localEnabled = !!(chkLocalHigh?.checked || chkLocalLow?.checked);
+    const j = await postJSON("/api/stream", {
+      mode: "start",
+      date,
+      session,
+      levels_mode: levelsMode,
+      local_time: localTime,
+      local_enabled: localEnabled,
+    });
+    streamRunning = !!j?.ok;
     // wipe UI and cancel any chart timers
     for (const id of Array.from(chartsById.keys())) destroyChart(id);
     feed.innerHTML = "";
@@ -1127,7 +1293,8 @@ function initCompact(){
   });
   // Stop
   btnStop.addEventListener("click", async () => {
-    await postJSON("/api/stream", { mode: "stop" });
+    const j = await postJSON("/api/stream", { mode: "stop" });
+    streamRunning = !j?.ok ? streamRunning : false;
   });
   // Pause alerts in this tab only
   btnPause.addEventListener("click", () => {
@@ -1171,6 +1338,86 @@ function initCompact(){
   // Filter toggles: re-render on change
   chkHod.addEventListener("change", renderAll);
   chkLod.addEventListener("change", renderAll);
+  levelsModeRadios.forEach(el => {
+    el.addEventListener("change", async () => {
+      syncLevelsModeUI();
+      await applyLiveSettings();
+    });
+  });
+  if (chkLocalHigh) {
+    chkLocalHigh.addEventListener("change", async () => {
+      renderAll();
+      await applyLiveSettings();
+    });
+  }
+  if (chkLocalLow) {
+    chkLocalLow.addEventListener("change", async () => {
+      renderAll();
+      await applyLiveSettings();
+    });
+  }
+  if (localTimeInput) {
+    localTimeInput.addEventListener("change", async () => {
+      localTimeInput.value = currentLocalTimeInput();
+      await applyLiveSettings();
+    });
+  }
+  if (btnApplyLive) {
+    btnApplyLive.addEventListener("click", async () => {
+      await applyLiveSettings();
+      if (!streamRunning) {
+        setStatus("Settings ready. Press Start to run.", true);
+      }
+    });
+  }
+  dateInput.addEventListener("change", async () => {
+    await applyLiveSettings();
+  });
+  document.querySelectorAll('input[name="session"]').forEach(el => {
+    el.addEventListener("change", async () => {
+      await applyLiveSettings();
+    });
+  });
+  if (sessionQuickBtns && sessionQuickBtns.length > 0) {
+    sessionQuickBtns.forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const sess = (btn.dataset.session || "").trim();
+        const t = normalizeHHMM(btn.dataset.local || "");
+        setLevelsMode("session");
+        if (sess) {
+          const radio = document.querySelector(`input[name="session"][value="${sess}"]`);
+          if (radio) radio.checked = true;
+        }
+        if (t && localTimeInput) localTimeInput.value = t;
+        await applyLiveSettings();
+      });
+    });
+  }
+  if (localPresetBtns && localPresetBtns.length > 0) {
+    localPresetBtns.forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const sess = (btn.dataset.session || "").trim();
+        const rawTime = String(btn.dataset.time || "").trim().toLowerCase();
+        let t = "";
+        if (rawTime === "now") {
+          t = nowHHMMET();
+        } else if (rawTime === "prev_half") {
+          t = halfHourStartET();
+        } else if (rawTime === "prev_hour") {
+          t = hourStartET();
+        } else {
+          t = normalizeHHMM(rawTime);
+        }
+        setLevelsMode("local");
+        if (sess) {
+          const radio = document.querySelector(`input[name="session"][value="${sess}"]`);
+          if (radio) radio.checked = true;
+        }
+        if (t && localTimeInput) localTimeInput.value = t;
+        await applyLiveSettings();
+      });
+    });
+  }
   // NEW RVOL control listeners
   rvolThreshold.addEventListener("input", () => {
     if (ws && ws.readyState === WebSocket.OPEN) {

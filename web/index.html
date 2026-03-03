@@ -28,8 +28,19 @@
         <div class="radio-row">
           <label><input type="radio" name="session" value="pre" checked> Pre-market (04:00-20:00)</label>
           <label><input type="radio" name="session" value="rth"> Regular (09:30-20:00)</label>
-          <!-- NEW -->
           <label><input type="radio" name="session" value="pm"> PM (16:00-20:00)</label>
+        </div>
+        <div class="quick-row">
+          <button type="button" class="quickBtn sessionQuick" data-session="pre" data-local="04:06">04:00</button>
+          <button type="button" class="quickBtn sessionQuick" data-session="rth" data-local="09:30">09:30</button>
+          <button type="button" class="quickBtn sessionQuick" data-session="pm" data-local="16:06">16:00</button>
+        </div>
+      </div>
+      <div class="field">
+        <span>Levels Mode</span>
+        <div class="radio-row">
+          <label><input type="radio" name="levelsMode" value="session" checked> Session HOD/LOD</label>
+          <label><input type="radio" name="levelsMode" value="local"> Local High/Low</label>
         </div>
       </div>
       <div class="field">
@@ -37,9 +48,26 @@
         <div class="radio-row">
           <label><input type="checkbox" id="chkHod" checked> HOD</label>
           <label><input type="checkbox" id="chkLod"> LOD</label>
+          <label><input type="checkbox" id="chkLocalHigh"> Local High</label>
+          <label><input type="checkbox" id="chkLocalLow"> Local Low</label>
         </div>
         <div class="muted" style="font-size:12px;margin-top:4px;">
-          If neither is checked, alerts are paused/hidden in this tab.
+          Toggle what you want to see in this tab.
+        </div>
+      </div>
+      <div class="field field-anchor">
+        <label for="localTimeInput">Local Anchor Time (ET)</label>
+        <div class="anchor-input-row">
+          <input id="localTimeInput" type="time" step="60" value="09:30" />
+          <button id="btnApplyLive" type="button" class="primary">Apply Live</button>
+        </div>
+        <div class="quick-row">
+          <button type="button" class="quickBtn localPreset" data-time="04:06" data-session="pre">04:06</button>
+          <button type="button" class="quickBtn localPreset" data-time="09:30" data-session="rth">09:30</button>
+          <button type="button" class="quickBtn localPreset" data-time="16:06" data-session="pm">16:06</button>
+          <button type="button" class="quickBtn localPreset" data-time="prev_half">Prev 1/2h</button>
+          <button type="button" class="quickBtn localPreset" data-time="prev_hour">Prev hour</button>
+          <button type="button" class="quickBtn localPreset" data-time="now">Now</button>
         </div>
       </div>
       <div class="field">

@@ -217,6 +217,67 @@ const (
 	SessionPM  SessionType = "pm"  // 16:00–20:00
 )
 
+func parseSessionType(v string) SessionType {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "pre":
+		return SessionPre
+	case "pm":
+		return SessionPM
+	default:
+		return SessionRTH
+	}
+}
+
+func sessionHiLoStart(startET time.Time, sess SessionType) time.Time {
+	if sess == SessionPre || sess == SessionPM {
+		return startET.Add(6 * time.Minute) // 04:06 / 16:06
+	}
+	return startET
+}
+
+func normalizeLevelsMode(v string) string {
+	if strings.EqualFold(strings.TrimSpace(v), "local") {
+		return "local"
+	}
+	return "session"
+}
+
+func normalizeClockHHMM(v string) (string, bool) {
+	s := strings.TrimSpace(v)
+	if s == "" {
+		return "", false
+	}
+	t, err := time.Parse("15:04", s)
+	if err != nil {
+		return "", false
+	}
+	return fmt.Sprintf("%02d:%02d", t.Hour(), t.Minute()), true
+}
+
+func clockOnDateET(date time.Time, et *time.Location, hhmm string) (time.Time, bool) {
+	clock, ok := normalizeClockHHMM(hhmm)
+	if !ok {
+		return time.Time{}, false
+	}
+	parts := strings.Split(clock, ":")
+	if len(parts) != 2 {
+		return time.Time{}, false
+	}
+	h, err1 := strconv.Atoi(parts[0])
+	m, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return time.Time{}, false
+	}
+	y, mo, d := date.In(et).Date()
+	return time.Date(y, mo, d, h, m, 0, 0, et), true
+}
+
+func sameETDate(a, b time.Time, et *time.Location) bool {
+	ay, am, ad := a.In(et).Date()
+	by, bm, bd := b.In(et).Date()
+	return ay == by && am == bm && ad == bd
+}
+
 func sessionBounds(et *time.Location, date time.Time, sess SessionType) (startET, endET time.Time) {
 	y, m, d := date.In(et).Date()
 	startH, startM := 4, 0
@@ -577,11 +638,20 @@ type odEngine struct {
 	startET       time.Time
 	endET         time.Time
 	alertsAfterET time.Time
+	highKind      string
+	lowKind       string
+	enabled       bool
 	h             *hub
 	eps           float64
 }
 
-func newOdEngine(h *hub, et *time.Location, startET, endET, alertsAfterET time.Time) *odEngine {
+func newOdEngine(h *hub, et *time.Location, startET, endET, alertsAfterET time.Time, highKind, lowKind string, enabled bool) *odEngine {
+	if strings.TrimSpace(highKind) == "" {
+		highKind = "hod"
+	}
+	if strings.TrimSpace(lowKind) == "" {
+		lowKind = "lod"
+	}
 	return &odEngine{
 		bySymbol:      make(map[string]*instrumentState),
 		allowed:       make(map[string]struct{}),
@@ -589,10 +659,29 @@ func newOdEngine(h *hub, et *time.Location, startET, endET, alertsAfterET time.T
 		alertsAfterET: alertsAfterET,
 		startET:       startET,
 		endET:         endET,
+		highKind:      strings.ToLower(strings.TrimSpace(highKind)),
+		lowKind:       strings.ToLower(strings.TrimSpace(lowKind)),
+		enabled:       enabled,
 		h:             h,
 		eps:           1e-9,
 	}
 }
+
+func (e *odEngine) resetWindow(startET, endET, alertsAfterET time.Time) {
+	e.mu.Lock()
+	e.startET = startET
+	e.endET = endET
+	e.alertsAfterET = alertsAfterET
+	e.bySymbol = make(map[string]*instrumentState)
+	e.mu.Unlock()
+}
+
+func (e *odEngine) setEnabled(v bool) {
+	e.mu.Lock()
+	e.enabled = v
+	e.mu.Unlock()
+}
+
 func (e *odEngine) setAllowed(symbols []string) {
 	m := make(map[string]struct{}, len(symbols))
 	for _, s := range symbols {
@@ -623,11 +712,14 @@ func (e *odEngine) upsertSymbol(sym, name string, sources []string) {
 	}
 }
 func (e *odEngine) trade(sym string, price float64, tsET time.Time) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.enabled {
+		return
+	}
 	if tsET.Before(e.startET) || tsET.After(e.endET) {
 		return
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	if _, ok := e.allowed[sym]; !ok {
 		return
 	}
@@ -657,7 +749,7 @@ func (e *odEngine) trade(sym string, price float64, tsET time.Time) {
 		st.LOD = price
 		if st.AlertedLow == 0 || price < st.AlertedLow-e.eps {
 			st.AlertedLow = price
-			msg := alertMsg{Type: "alert", Kind: "lod", Time: etClock(tsET), Sym: sym, Name: st.Name, Sources: copyStringSlice(st.Sources), Price: price, TSUnix: tsET.UnixNano() / int64(time.Millisecond)}
+			msg := alertMsg{Type: "alert", Kind: e.lowKind, Time: etClock(tsET), Sym: sym, Name: st.Name, Sources: copyStringSlice(st.Sources), Price: price, TSUnix: tsET.UnixNano() / int64(time.Millisecond)}
 			e.h.addHistory(msg)
 			e.h.broadcast(msg)
 		}
@@ -667,7 +759,7 @@ func (e *odEngine) trade(sym string, price float64, tsET time.Time) {
 		st.HOD = price
 		if st.AlertedHigh == 0 || price > st.AlertedHigh+e.eps {
 			st.AlertedHigh = price
-			msg := alertMsg{Type: "alert", Kind: "hod", Time: etClock(tsET), Sym: sym, Name: st.Name, Sources: copyStringSlice(st.Sources), Price: price, TSUnix: tsET.UnixNano() / int64(time.Millisecond)}
+			msg := alertMsg{Type: "alert", Kind: e.highKind, Time: etClock(tsET), Sym: sym, Name: st.Name, Sources: copyStringSlice(st.Sources), Price: price, TSUnix: tsET.UnixNano() / int64(time.Millisecond)}
 			e.h.addHistory(msg)
 			e.h.broadcast(msg)
 		}
@@ -922,6 +1014,16 @@ func (m *rvolManager) resetCooldowns() {
 	m.lastAlertAt = make(map[string]time.Time)
 	m.mu.Unlock()
 }
+
+func (m *rvolManager) resetIntradayState() {
+	m.mu.Lock()
+	m.cumuVolumes = make(map[string]map[int]int64)
+	m.lastMinute = make(map[string]time.Time)
+	m.lastClose = make(map[string]float64)
+	m.lastAlertAt = make(map[string]time.Time)
+	m.mu.Unlock()
+}
+
 func (m *rvolManager) OnAM(sym string, a poly.AggregateMinute, lastPrice float64) {
 	// We intentionally use the Polygon 1‑minute candle close for both the displayed price
 	// and the delta calculation (current close − prior minute close). The last trade price
@@ -1696,9 +1798,12 @@ func main() {
 
 	// API: start/stop stream (Polygon Broker lifecycle is tied to stream start/stop)
 	type streamReq struct {
-		Mode    string `json:"mode"`              // "start" | "stop"
-		Date    string `json:"date,omitempty"`    // YYYY-MM-DD
-		Session string `json:"session,omitempty"` // "pre" | "rth"
+		Mode         string `json:"mode"`                    // "start" | "stop" | "update"
+		Date         string `json:"date,omitempty"`          // YYYY-MM-DD
+		Session      string `json:"session,omitempty"`       // "pre" | "rth" | "pm"
+		LevelsMode   string `json:"levels_mode,omitempty"`   // "session" | "local"
+		LocalTime    string `json:"local_time,omitempty"`    // HH:MM ET
+		LocalEnabled *bool  `json:"local_enabled,omitempty"` // local high/low engine toggle
 	}
 	type streamResp struct {
 		OK     bool   `json:"ok"`
@@ -1709,9 +1814,14 @@ func main() {
 	var broker *poly.Broker
 	var bars = newBarStore(et)
 	var eng *odEngine
+	var localEng *odEngine
 	var lastPrice sync.Map // symbol -> price (float64) used in RVOL alert
 	var subsMu sync.Mutex
 	subs := make(map[string]*poly.Subscription) // symbol -> subscription
+	var localCfgMu sync.RWMutex
+	localAnchorClock := "09:30"
+	localLevelsEnabled := false
+	levelsMode := "session"
 
 	// consumer helper
 	startConsumer := func(ctx context.Context, sym string) *poly.Subscription {
@@ -1724,8 +1834,14 @@ func main() {
 					ts := time.Unix(0, t.T*int64(time.Millisecond)).In(et)
 					lastPrice.Store(sym, t.P)
 					name, sources := getSymbolMeta(sym)
-					eng.upsertSymbol(sym, name, sources)
-					eng.trade(sym, t.P, ts)
+					if eng != nil {
+						eng.upsertSymbol(sym, name, sources)
+						eng.trade(sym, t.P, ts)
+					}
+					if localEng != nil {
+						localEng.upsertSymbol(sym, name, sources)
+						localEng.trade(sym, t.P, ts)
+					}
 				case am := <-sub.Minutes:
 					// store in per-minute cache and feed RVOL
 					bars.addAM(sym, am, et)
@@ -1792,11 +1908,30 @@ func main() {
 			http.Error(w, "bad json", http.StatusBadRequest)
 			return
 		}
+
+		parseDate := func(raw string, fallback time.Time) time.Time {
+			out := fallback
+			if strings.TrimSpace(raw) == "" {
+				return out
+			}
+			t, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(raw), et)
+			if err == nil {
+				out = t
+			}
+			return out
+		}
+
 		switch strings.ToLower(req.Mode) {
 		case "stop":
 			if streamCancel != nil {
 				streamCancel()
 				streamCancel = nil
+			}
+			if eng != nil {
+				eng.setEnabled(false)
+			}
+			if localEng != nil {
+				localEng.setEnabled(false)
 			}
 			// Unsubscribe all active subs and clear
 			if broker != nil {
@@ -1819,25 +1954,35 @@ func main() {
 				streamCancel()
 				streamCancel = nil
 			}
-			// parse date
-			dt := time.Now().In(et)
-			if strings.TrimSpace(req.Date) != "" {
-				t, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(req.Date), et)
-				if err == nil {
-					dt = t
-				}
-			}
-			var sess SessionType
-			switch strings.ToLower(strings.TrimSpace(req.Session)) {
-			case "pre":
-				sess = SessionPre
-			case "pm":
-				sess = SessionPM
-			default:
-				sess = SessionRTH
-			}
+
+			dt := parseDate(req.Date, time.Now().In(et))
+			sess := parseSessionType(req.Session)
+			newLevelsMode := normalizeLevelsMode(req.LevelsMode)
 			streamSymbols, streamNames, streamSources := getWatchSnapshot()
 			startET, endET := sessionBounds(et, dt, sess)
+			odStartET := sessionHiLoStart(startET, sess)
+			nowET := time.Now().In(et)
+
+			localClock := odStartET.Format("15:04")
+			if req.LocalTime != "" {
+				norm, ok := normalizeClockHHMM(req.LocalTime)
+				if !ok {
+					http.Error(w, "invalid local_time (expected HH:MM)", http.StatusBadRequest)
+					return
+				}
+				localClock = norm
+			}
+			localEnabled := false
+			if req.LocalEnabled != nil {
+				localEnabled = *req.LocalEnabled
+			}
+			sessionEngineEnabled := newLevelsMode == "session"
+			localEngineEnabled := newLevelsMode == "local" && localEnabled
+			localStartET, ok := clockOnDateET(dt, et, localClock)
+			if !ok {
+				localStartET = odStartET
+			}
+
 			// reset stores
 			bars.reset()
 			h.resetHistories()
@@ -1845,28 +1990,48 @@ func main() {
 			profMu.Lock()
 			profBySym = make(map[string]ProfileInfo)
 			profMu.Unlock()
-			// IMPORTANT: HOD/LOD begins at 16:06 when PM is selected
-			odStartET := startET
-			if sess == SessionPre || sess == SessionPM {
-				odStartET = odStartET.Add(6 * time.Minute) // 16:06 ET or 04:06 ET for pre
+
+			if eng == nil {
+				eng = newOdEngine(h, et, odStartET, endET, nowET, "hod", "lod", sessionEngineEnabled)
+			} else {
+				eng.resetWindow(odStartET, endET, nowET)
+				eng.setEnabled(sessionEngineEnabled)
 			}
-			eng = newOdEngine(h, et, odStartET, endET, time.Now().In(et))
 			eng.setAllowed(streamSymbols)
+			if localEng == nil {
+				localEng = newOdEngine(h, et, localStartET, endET, nowET, "lhigh", "llow", localEngineEnabled)
+			} else {
+				localEng.resetWindow(localStartET, endET, nowET)
+				localEng.setEnabled(localEngineEnabled)
+			}
+			localEng.setAllowed(streamSymbols)
 			for _, s := range streamSymbols {
 				eng.upsertSymbol(s, streamNames[s], streamSources[s])
+				localEng.upsertSymbol(s, streamNames[s], streamSources[s])
 			}
 
-			// Seed HOD/LOD from session start (04:06/09:30/16:06 ET) up to now so alerts reflect the true session range,
-			// not "since program start".
-			seedSessionHiLo(et, polygonKey, streamSymbols, streamNames, streamSources, odStartET, time.Now().In(et), endET, eng)
+			// Seed session HOD/LOD from 04:06/09:30/16:06 ET up to now.
+			if sessionEngineEnabled {
+				seedSessionHiLo(et, polygonKey, streamSymbols, streamNames, streamSources, odStartET, nowET, endET, eng)
+			}
+			if localEngineEnabled {
+				seedSessionHiLo(et, polygonKey, streamSymbols, streamNames, streamSources, localStartET, nowET, endET, localEng)
+			}
 
 			// Set scalp session start and seed VWAP/SMA from session start so we are correct mid-session.
 			sdet.SetSessionStart(startET)
-			seedScalpVWAP(et, polygonKey, streamSymbols, startET, time.Now().In(et), endET, sdet)
+			seedScalpVWAP(et, polygonKey, streamSymbols, startET, nowET, endET, sdet)
 
 			// RVOL
 			rvm.setSession(dt, sess)
+			rvm.resetIntradayState()
 			rvm.loadBaselines(streamSymbols) // load baselines for current watchlist
+
+			localCfgMu.Lock()
+			localAnchorClock = localClock
+			localLevelsEnabled = localEnabled
+			levelsMode = newLevelsMode
+			localCfgMu.Unlock()
 
 			// broker ctx
 			streamCtx, streamCancel = context.WithCancel(context.Background())
@@ -1885,8 +2050,124 @@ func main() {
 				}
 			}()
 			label := map[SessionType]string{SessionPre: "Pre‑market", SessionRTH: "RTH", SessionPM: "PM"}[sess]
-			h.broadcast(statusMsg{Type: "status", Level: "success", Text: fmt.Sprintf("%s started (%s–%s ET)", label, startET.Format("15:04"), endET.Format("15:04"))})
+			localState := "disabled"
+			if newLevelsMode == "local" && localEngineEnabled {
+				localState = localClock
+			}
+			h.broadcast(statusMsg{
+				Type:  "status",
+				Level: "success",
+				Text:  fmt.Sprintf("%s started (%s–%s ET), mode=%s, local H/L %s", label, startET.Format("15:04"), endET.Format("15:04"), newLevelsMode, localState),
+			})
 			_ = json.NewEncoder(w).Encode(streamResp{OK: true, Status: "Stream starting"})
+		case "update":
+			if streamCancel == nil || eng == nil || localEng == nil {
+				_ = json.NewEncoder(w).Encode(streamResp{OK: false, Status: "Not running"})
+				return
+			}
+
+			rvm.mu.RLock()
+			curDate := rvm.anchorDate
+			curSess := rvm.session
+			rvm.mu.RUnlock()
+			if curDate.IsZero() {
+				curDate = time.Now().In(et)
+			}
+			if curSess == "" {
+				curSess = SessionRTH
+			}
+
+			localCfgMu.RLock()
+			curLocalClock := localAnchorClock
+			curLocalEnabled := localLevelsEnabled
+			curLevelsMode := levelsMode
+			localCfgMu.RUnlock()
+
+			newDate := parseDate(req.Date, curDate)
+			newSess := curSess
+			if strings.TrimSpace(req.Session) != "" {
+				newSess = parseSessionType(req.Session)
+			}
+			newLocalClock := curLocalClock
+			if strings.TrimSpace(req.LocalTime) != "" {
+				norm, ok := normalizeClockHHMM(req.LocalTime)
+				if !ok {
+					http.Error(w, "invalid local_time (expected HH:MM)", http.StatusBadRequest)
+					return
+				}
+				newLocalClock = norm
+			}
+			newLocalEnabled := curLocalEnabled
+			if req.LocalEnabled != nil {
+				newLocalEnabled = *req.LocalEnabled
+			}
+			newLevelsMode := curLevelsMode
+			if strings.TrimSpace(req.LevelsMode) != "" {
+				newLevelsMode = normalizeLevelsMode(req.LevelsMode)
+			}
+
+			streamSymbols, streamNames, streamSources := getWatchSnapshot()
+			nowET := time.Now().In(et)
+			startET, endET := sessionBounds(et, newDate, newSess)
+			odStartET := sessionHiLoStart(startET, newSess)
+			localStartET, ok := clockOnDateET(newDate, et, newLocalClock)
+			if !ok {
+				localStartET = odStartET
+				newLocalClock = odStartET.Format("15:04")
+			}
+
+			sessionChanged := curSess != newSess || !sameETDate(curDate, newDate, et)
+			modeChanged := newLevelsMode != curLevelsMode
+			sessionEngineEnabled := newLevelsMode == "session"
+			localEngineEnabled := newLevelsMode == "local" && newLocalEnabled
+			localChanged := newLocalEnabled != curLocalEnabled || newLocalClock != curLocalClock || sessionChanged || modeChanged
+
+			if sessionChanged || modeChanged {
+				eng.resetWindow(odStartET, endET, nowET)
+				eng.setEnabled(sessionEngineEnabled)
+				eng.setAllowed(streamSymbols)
+				for _, s := range streamSymbols {
+					eng.upsertSymbol(s, streamNames[s], streamSources[s])
+				}
+				if sessionEngineEnabled {
+					seedSessionHiLo(et, polygonKey, streamSymbols, streamNames, streamSources, odStartET, nowET, endET, eng)
+				}
+
+				if sessionChanged {
+					sdet.SetSessionStart(startET)
+					seedScalpVWAP(et, polygonKey, streamSymbols, startET, nowET, endET, sdet)
+
+					rvm.setSession(newDate, newSess)
+					rvm.resetIntradayState()
+					go rvm.loadBaselines(streamSymbols)
+				}
+			}
+
+			if localChanged {
+				localEng.resetWindow(localStartET, endET, nowET)
+				localEng.setEnabled(localEngineEnabled)
+				localEng.setAllowed(streamSymbols)
+				for _, s := range streamSymbols {
+					localEng.upsertSymbol(s, streamNames[s], streamSources[s])
+				}
+				if localEngineEnabled {
+					seedSessionHiLo(et, polygonKey, streamSymbols, streamNames, streamSources, localStartET, nowET, endET, localEng)
+				}
+				localCfgMu.Lock()
+				localAnchorClock = newLocalClock
+				localLevelsEnabled = newLocalEnabled
+				levelsMode = newLevelsMode
+				localCfgMu.Unlock()
+			}
+
+			label := map[SessionType]string{SessionPre: "Pre‑market", SessionRTH: "RTH", SessionPM: "PM"}[newSess]
+			localState := "disabled"
+			if newLevelsMode == "local" && localEngineEnabled {
+				localState = newLocalClock
+			}
+			txt := fmt.Sprintf("Updated: %s (%s–%s ET), mode=%s, local H/L %s", label, startET.Format("15:04"), endET.Format("15:04"), newLevelsMode, localState)
+			h.broadcast(statusMsg{Type: "status", Level: "success", Text: txt})
+			_ = json.NewEncoder(w).Encode(streamResp{OK: true, Status: txt})
 		default:
 			_ = json.NewEncoder(w).Encode(streamResp{OK: false, Status: "Unknown mode"})
 		}
@@ -1903,8 +2184,14 @@ func main() {
 			Port                 int         `json:"port"`
 			MiniChartLookbackMin int         `json:"mini_chart_lookback_min"`
 			RVOL                 interface{} `json:"rvol"`
+			Local                interface{} `json:"local"`
 			UI                   interface{} `json:"ui"`
 		}
+		localCfgMu.RLock()
+		localClock := localAnchorClock
+		localEnabled := localLevelsEnabled
+		lvMode := levelsMode
+		localCfgMu.RUnlock()
 		out := resp{
 			Running: streamCancel != nil,
 			Session: "", Date: "", StartET: "", EndET: "",
@@ -1915,6 +2202,11 @@ func main() {
 				"method":        string(rvm.method),
 				"baseline_mode": rvm.baselineMode,
 				"active":        rvm.active,
+			},
+			Local: map[string]any{
+				"time":        localClock,
+				"enabled":     localEnabled,
+				"levels_mode": lvMode,
 			},
 			UI: map[string]any{
 				"tiny_cap_max":          cfg.UI.LiveColors.TinyCapMax,
@@ -2110,6 +2402,12 @@ func main() {
 				eng.upsertSymbol(s, nnames[s], nsources[s])
 			}
 		}
+		if localEng != nil {
+			localEng.setAllowed(nsymbols)
+			for _, s := range nsymbols {
+				localEng.upsertSymbol(s, nnames[s], nsources[s])
+			}
+		}
 		if broker != nil {
 			// Start consumers for ADDED under current stream context
 			if len(added) > 0 {
@@ -2140,6 +2438,26 @@ func main() {
 		// reload baselines for added symbols
 		if len(added) > 0 {
 			go rvm.loadBaselines(added)
+		}
+		// If local levels are enabled, seed only added symbols immediately from the current local anchor.
+		if len(added) > 0 && localEng != nil {
+			localCfgMu.RLock()
+			localClock := localAnchorClock
+			localEnabled := localLevelsEnabled
+			lvMode := levelsMode
+			localCfgMu.RUnlock()
+			if localEnabled && lvMode == "local" {
+				rvm.mu.RLock()
+				date := rvm.anchorDate
+				sess := rvm.session
+				rvm.mu.RUnlock()
+				if !date.IsZero() {
+					_, endET := sessionBounds(et, date, sess)
+					if localStartET, ok := clockOnDateET(date, et, localClock); ok {
+						go seedSessionHiLo(et, polygonKey, added, nnames, nsources, localStartET, time.Now().In(et), endET, localEng)
+					}
+				}
+			}
 		}
 
 		status := fmt.Sprintf("Watchlists reloaded (%d files): +%d / -%d (kept %d)", len(watchlistFiles), len(added), len(removed), len(kept))
