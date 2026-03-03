@@ -103,6 +103,23 @@ button:hover{ filter:brightness(1.06); }
 .col{ min-width: 0; }
 .leftCol{ }
 .rightCol{ position: relative; }
+.rightTabs{ display:flex; flex-direction:column; gap:10px; }
+.tabRow{ display:flex; gap:8px; flex-wrap:wrap; }
+.tabBtn{
+  background:#0f1016;
+  border:1px solid #262a33;
+  color:var(--muted);
+  border-radius:999px;
+  padding:6px 12px;
+  font-weight:700;
+}
+.tabBtn.isActive{
+  background:var(--blue);
+  border-color:var(--blue);
+  color:#fff;
+}
+.tabPane{ min-width:0; }
+.tabPane[hidden]{ display:none !important; }
 
 /* Right column live stream (no scroll, auto trimmed by JS) */
 .liveFeed{

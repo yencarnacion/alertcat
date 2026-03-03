@@ -1,6 +1,10 @@
 const statusPill = document.getElementById("status");
 const feed = document.getElementById("feed");
 const liveFeed = document.getElementById("live"); // NEW: right column live stream
+const liveWrap = document.getElementById("liveWrap");
+const alertsWrap = document.getElementById("alertsWrap");
+const tabLiveBtn = document.getElementById("tabLiveBtn");
+const tabRvolBtn = document.getElementById("tabRvolBtn");
 const soundBtn = document.getElementById("soundBtn");
 const soundState = document.getElementById("soundState");
 
@@ -84,6 +88,7 @@ const activeChartQueue = [];
 const chartLookbackMinDefault = 120;
 let chartLookbackMin = chartLookbackMinDefault;
 const chartRefreshMs = 15000;
+const RIGHT_TAB_STORAGE_KEY = "alertcat.right_tab";
 // --- Pinning (persisted in this browser) ---
 const pinLimit = 6;
 let pinnedOrder = []; // array of ids (in pin insertion order)
@@ -359,6 +364,47 @@ function getParam(name){
     return u.searchParams.get(name) || "";
   } catch { return ""; }
 }
+function setRightTab(tab) {
+  const next = tab === "rvol" ? "rvol" : "live";
+  const showLive = next === "live";
+
+  if (liveWrap) {
+    if (showLive) liveWrap.removeAttribute("hidden");
+    else liveWrap.setAttribute("hidden", "");
+  }
+  if (alertsWrap) {
+    if (showLive) alertsWrap.setAttribute("hidden", "");
+    else alertsWrap.removeAttribute("hidden");
+  }
+
+  if (tabLiveBtn) {
+    tabLiveBtn.classList.toggle("isActive", showLive);
+    tabLiveBtn.setAttribute("aria-selected", showLive ? "true" : "false");
+  }
+  if (tabRvolBtn) {
+    tabRvolBtn.classList.toggle("isActive", !showLive);
+    tabRvolBtn.setAttribute("aria-selected", showLive ? "false" : "true");
+  }
+
+  try { localStorage.setItem(RIGHT_TAB_STORAGE_KEY, next); } catch {}
+  if (showLive) recomputeLiveCapacity();
+}
+function initRightTabs() {
+  if (!tabLiveBtn || !tabRvolBtn || !liveWrap || !alertsWrap) return;
+
+  let tab = "live";
+  try {
+    const saved = localStorage.getItem(RIGHT_TAB_STORAGE_KEY);
+    if (saved === "live" || saved === "rvol") tab = saved;
+  } catch {}
+
+  const paramTab = getParam("tab").toLowerCase();
+  if (paramTab === "live" || paramTab === "rvol") tab = paramTab;
+
+  setRightTab(tab);
+  tabLiveBtn.addEventListener("click", () => setRightTab("live"));
+  tabRvolBtn.addEventListener("click", () => setRightTab("rvol"));
+}
 function shouldShow(kind){
   const hodOn = !!chkHod?.checked;
   const lodOn = !!chkLod?.checked;
@@ -617,6 +663,7 @@ function trimLive() {
 }
 function recomputeLiveCapacity() {
   if (!liveFeed) return;
+  if (liveWrap && liveWrap.hasAttribute("hidden")) return;
   // Make sure the container has a precise height that fits the viewport.
   const boxTop = liveFeed.getBoundingClientRect().top;
   const target = Math.max(120, Math.floor(window.innerHeight - boxTop - 12));
@@ -1256,6 +1303,7 @@ function initCompact(){
   window.addEventListener('touchstart', enableSound, { once:true });
   // Compact mode first so layout is set before initial renders
   initCompact();
+  initRightTabs();
   if (chkCompact) {
     chkCompact.addEventListener('change', (e) => setCompact(!!e.target.checked));
   }

@@ -143,30 +143,36 @@
         <section id="feed" class="feed" aria-live="polite"></section>
       </div>
 
-      <!-- RIGHT: Live, auto-trimming, newest-at-top, no scroll -->
+      <!-- RIGHT: tabbed panel (Live Alerts / RVOL table) -->
       <div class="col rightCol">
-        <section id="liveWrap" class="panel">
-          <div class="title">Live Alerts</div>
-          <div id="live" class="liveFeed" aria-live="polite"></div>
-        </section>
+        <section class="panel rightTabs" aria-label="Right panel tabs">
+          <div class="tabRow" role="tablist" aria-label="Alert views">
+            <button id="tabLiveBtn" type="button" class="tabBtn isActive" role="tab" aria-controls="liveWrap" aria-selected="true">Live Alerts</button>
+            <button id="tabRvolBtn" type="button" class="tabBtn" role="tab" aria-controls="alertsWrap" aria-selected="false">RVOL Table</button>
+          </div>
 
-        <!-- Keep the RVOL table (optional reference) below the live stream -->
-        <section id="alertsWrap" class="panel" aria-live="polite">
-          <div class="title">Recent RVOL Alerts <span id="alertsCount" class="count">(0)</span></div>
-          <table id="alertsTable">
-            <thead>
-              <tr>
-                <th scope="col">Time (ET)</th>
-                <th scope="col" class="sortable" data-key="symbol" title="Sort Ticker (per minute)">Ticker</th>
-                <th scope="col" class="sortable" data-key="price" title="Sort Price (per minute)">Price</th>
-                <th scope="col" class="sortable" data-key="volume" title="Sort Volume (per minute)">Volume</th>
-                <th scope="col" class="sortable" data-key="baseline" title="Sort Baseline (per minute)">Baseline</th>
-                <th scope="col" class="sortable" data-key="rvol" title="Sort RVOL (per minute)">RVOL</th>
-                <th scope="col">Method</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+          <section id="liveWrap" class="tabPane" role="tabpanel" aria-live="polite">
+            <div class="title">Live Alerts</div>
+            <div id="live" class="liveFeed" aria-live="polite"></div>
+          </section>
+
+          <section id="alertsWrap" class="tabPane" role="tabpanel" aria-live="polite" hidden>
+            <div class="title">Recent RVOL Alerts <span id="alertsCount" class="count">(0)</span></div>
+            <table id="alertsTable">
+              <thead>
+                <tr>
+                  <th scope="col">Time (ET)</th>
+                  <th scope="col" class="sortable" data-key="symbol" title="Sort Ticker (per minute)">Ticker</th>
+                  <th scope="col" class="sortable" data-key="price" title="Sort Price (per minute)">Price</th>
+                  <th scope="col" class="sortable" data-key="volume" title="Sort Volume (per minute)">Volume</th>
+                  <th scope="col" class="sortable" data-key="baseline" title="Sort Baseline (per minute)">Baseline</th>
+                  <th scope="col" class="sortable" data-key="rvol" title="Sort RVOL (per minute)">RVOL</th>
+                  <th scope="col">Method</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </section>
         </section>
       </div>
     </section>
