@@ -215,6 +215,120 @@ func TestOdEngineSeedHiLoRequiresTrueBreakout(t *testing.T) {
 	}
 }
 
+func TestNormalizeLevelsModeAndClockHelpers(t *testing.T) {
+	levelTests := []struct {
+		in   string
+		want string
+	}{
+		{in: "local", want: "local"},
+		{in: " LoCaL ", want: "local"},
+		{in: "session", want: "session"},
+		{in: "", want: "session"},
+		{in: "anything-else", want: "session"},
+	}
+	for _, tc := range levelTests {
+		if got := normalizeLevelsMode(tc.in); got != tc.want {
+			t.Fatalf("normalizeLevelsMode(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+
+	clockTests := []struct {
+		in     string
+		want   string
+		wantOK bool
+	}{
+		{in: "09:30", want: "09:30", wantOK: true},
+		{in: "16:06", want: "16:06", wantOK: true},
+		{in: "9:30", want: "09:30", wantOK: true},
+		{in: "24:00", wantOK: false},
+		{in: "", wantOK: false},
+	}
+	for _, tc := range clockTests {
+		got, ok := normalizeClockHHMM(tc.in)
+		if ok != tc.wantOK {
+			t.Fatalf("normalizeClockHHMM(%q) ok = %v, want %v", tc.in, ok, tc.wantOK)
+		}
+		if tc.wantOK && got != tc.want {
+			t.Fatalf("normalizeClockHHMM(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestClockOnDateETUsesETCalendarDay(t *testing.T) {
+	et := mustET("America/New_York")
+	// 01:00 UTC on Mar 2 is still Mar 1 in ET.
+	dateUTC := time.Date(2026, time.March, 2, 1, 0, 0, 0, time.UTC)
+
+	got, ok := clockOnDateET(dateUTC, et, "09:30")
+	if !ok {
+		t.Fatalf("clockOnDateET returned ok=false")
+	}
+	want := time.Date(2026, time.March, 1, 9, 30, 0, 0, et)
+	if !got.Equal(want) {
+		t.Fatalf("clockOnDateET = %v, want %v", got, want)
+	}
+}
+
+func TestOdEngineLocalModeAlertsAfterBoundaryWithLocalKinds(t *testing.T) {
+	et := mustET("America/New_York")
+	start := time.Date(2026, time.March, 2, 10, 0, 0, 0, et)
+	end := time.Date(2026, time.March, 2, 20, 0, 0, 0, et)
+	alertsAfter := time.Date(2026, time.March, 2, 10, 30, 0, 0, et)
+
+	h := newHub(50)
+	eng := newOdEngine(h, et, start, end, alertsAfter, "lhigh", "llow", true)
+	eng.setAllowed([]string{"ABC"})
+	eng.upsertSymbol("ABC", "ABC Co", []string{"watchlist"})
+
+	// Before alertsAfter: update local hi/low state but never emit.
+	eng.trade("ABC", 10.00, start.Add(5*time.Minute))
+	eng.trade("ABC", 10.50, start.Add(10*time.Minute))
+	eng.trade("ABC", 9.80, start.Add(20*time.Minute))
+	eng.trade("ABC", 10.70, start.Add(29*time.Minute))
+
+	// At/after alertsAfter: only true breakouts should emit local kinds.
+	eng.trade("ABC", 10.70, start.Add(31*time.Minute)) // equal high, no alert
+	eng.trade("ABC", 10.71, start.Add(32*time.Minute)) // local high alert
+	eng.trade("ABC", 9.79, start.Add(33*time.Minute))  // local low alert
+
+	alerts, _ := h.getHistory()
+	if len(alerts) != 2 {
+		t.Fatalf("alerts len = %d, want 2", len(alerts))
+	}
+	if alerts[0].Kind != "lhigh" || alerts[1].Kind != "llow" {
+		t.Fatalf("unexpected local alert kinds: %#v", alerts)
+	}
+	if alerts[0].Name != "ABC Co" || len(alerts[0].Sources) != 1 || alerts[0].Sources[0] != "watchlist" {
+		t.Fatalf("unexpected metadata on local high alert: %#v", alerts[0])
+	}
+}
+
+func TestOdEngineLocalModeHonorsEnabledToggle(t *testing.T) {
+	et := mustET("America/New_York")
+	start := time.Date(2026, time.March, 2, 9, 30, 0, 0, et)
+	end := start.Add(6 * time.Hour)
+
+	h := newHub(50)
+	eng := newOdEngine(h, et, start, end, start, "lhigh", "llow", false)
+	eng.setAllowed([]string{"ABC"})
+	eng.upsertSymbol("ABC", "ABC Co", []string{"watchlist"})
+
+	eng.trade("ABC", 10.00, start.Add(1*time.Second))
+	eng.trade("ABC", 11.00, start.Add(2*time.Second))
+
+	eng.setEnabled(true)
+	eng.trade("ABC", 12.00, start.Add(3*time.Second)) // initialize only once enabled
+	eng.trade("ABC", 12.10, start.Add(4*time.Second)) // breakout -> alert
+
+	alerts, _ := h.getHistory()
+	if len(alerts) != 1 {
+		t.Fatalf("alerts len = %d, want 1", len(alerts))
+	}
+	if alerts[0].Kind != "lhigh" {
+		t.Fatalf("alert kind = %q, want lhigh", alerts[0].Kind)
+	}
+}
+
 func TestRvolManagerOnAMRespectsCooldown(t *testing.T) {
 	tmp := t.TempDir()
 	oldWD, err := os.Getwd()
