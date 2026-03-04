@@ -160,7 +160,8 @@ button:hover{ filter:brightness(1.06); }
   display:flex;
   flex-direction: column-reverse; /* newest first at top */
   gap:8px;
-  max-height: 70vh;
+  min-height: 180px;
+  height: 60vh; /* JS computes exact viewport-fit height */
   overflow:auto;
 }
 
@@ -171,6 +172,7 @@ button:hover{ filter:brightness(1.06); }
   gap:12px;
   align-items:start;
   margin-top: 12px;
+  min-height: 100vh;
 }
 .col{ min-width: 0; }
 .leftCol{ }

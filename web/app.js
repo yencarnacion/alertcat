@@ -67,6 +67,7 @@ let recentAlerts = []; // for RVOL [{time, symbol, price, volume, baseline, rvol
 let silent = false;
 let sessionDateET = ""; // YYYY-MM-DD (from /api/status)
 const TICK_HISTORY_LIMIT = 2400;
+const TICK_VISIBLE_BARS = 20;
 const tickDirsBySymbol = new Map(); // sym -> -1 | 1
 let tickSeries = null;
 let tickLineSeries = null;
@@ -480,7 +481,16 @@ function ensureTickChart() {
       horzLines: { color: "rgba(155, 170, 195, 0.12)" },
     },
     crosshair: { mode: 0 },
-    timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false, rightOffset: 3 },
+    timeScale: {
+      borderVisible: false,
+      timeVisible: true,
+      secondsVisible: false,
+      rightOffset: 0.25,
+      barSpacing: 8,
+      minBarSpacing: 4,
+      fixRightEdge: true,
+      lockVisibleTimeRangeOnResize: true,
+    },
     rightPriceScale: {
       borderVisible: false,
       autoScale: false,
@@ -547,6 +557,14 @@ function updateTickScaleBounds() {
     tickChart.priceScale("right").setVisibleRange({ from: -bound, to: bound });
   } catch {}
 }
+function updateTickVisibleRange() {
+  if (!tickChart || tickData.length === 0) return;
+  const to = tickData.length - 1 + 0.25;
+  const from = to - Math.max(2, TICK_VISIBLE_BARS - 1);
+  try {
+    tickChart.timeScale().setVisibleLogicalRange({ from, to });
+  } catch {}
+}
 function drawTickSeries(fit = false) {
   ensureTickChart();
   if (!tickSeries) return;
@@ -555,9 +573,15 @@ function drawTickSeries(fit = false) {
     tickLineSeries.setData(tickData.map(p => ({ time: p.time, value: p.value })));
   }
   updateTickScaleBounds();
+  updateTickVisibleRange();
   if (tickChart) {
-    if (fit) tickChart.timeScale().fitContent();
-    else tickChart.timeScale().scrollToRealTime();
+    if (fit && tickData.length <= 2) {
+      tickChart.timeScale().fitContent();
+      updateTickVisibleRange();
+    } else {
+      tickChart.timeScale().scrollToRealTime();
+      updateTickVisibleRange();
+    }
   }
 }
 function resetTickChart() {
@@ -593,20 +617,21 @@ function applyTickTransition(alertObj) {
 }
 function appendTickPoint(point, redraw = true) {
   if (!point || !Number.isFinite(point.time)) return;
+  const n = tickData.length;
+  let pointTime = Math.max(1, Math.floor(point.time));
+  if (n > 0 && pointTime <= tickData[n - 1].time) {
+    // Keep each incoming alert as a visible bar, even when multiple alerts share a second.
+    pointTime = tickData[n - 1].time + 1;
+  }
   const color = tickColor(point.value);
   const normalized = {
-    time: Math.max(1, Math.floor(point.time)),
+    time: pointTime,
     value: Math.round(Number(point.value) || 0),
     color,
   };
-  const n = tickData.length;
-  if (n > 0 && tickData[n - 1].time === normalized.time) {
-    tickData[n - 1] = normalized;
-  } else {
-    tickData.push(normalized);
-    if (tickData.length > TICK_HISTORY_LIMIT) {
-      tickData = tickData.slice(tickData.length - TICK_HISTORY_LIMIT);
-    }
+  tickData.push(normalized);
+  if (tickData.length > TICK_HISTORY_LIMIT) {
+    tickData = tickData.slice(tickData.length - TICK_HISTORY_LIMIT);
   }
   updateTickReadout(normalized.value);
   if (redraw) drawTickSeries(false);
@@ -895,6 +920,12 @@ function renderFeed() {
 
 /* ============ RIGHT: Live stream ============ */
 let liveMaxItems = 6; // will be recomputed after first render
+function recomputeFeedCapacity() {
+  if (!feed) return;
+  const boxTop = feed.getBoundingClientRect().top;
+  const target = Math.max(180, Math.floor(window.innerHeight - boxTop - 12));
+  feed.style.height = target + "px";
+}
 function trimLive() {
   if (!liveFeed) return;
   while (liveFeed.children.length > liveMaxItems) {
@@ -945,6 +976,7 @@ function renderAll(){
   for (const id of Array.from(chartsById.keys())) destroyChart(id);
   renderPinned();
   renderFeed();
+  recomputeFeedCapacity();
   recomputeLiveCapacity();
   seedLiveFromHistory();
 }
@@ -1748,6 +1780,7 @@ function initCompact(){
   initStatus().then(() => {});
   // Keep live pane sized correctly
   window.addEventListener("resize", () => {
+    recomputeFeedCapacity();
     recomputeLiveCapacity();
   });
   // === RVOL table header sorting (per-minute) ===
