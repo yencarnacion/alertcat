@@ -75,6 +75,7 @@ let tickChart = null;
 let tickRO = null;
 let tickData = []; // [{time, value, color}]
 let tickCurrentValue = 0;
+let tickUniverseSize = 0; // total active watchlist symbols across all loaded watchlists
 const scalpAudio = document.createElement("audio");
 scalpAudio.src = "/scalp.mp3";
 scalpAudio.preload = "auto";
@@ -459,6 +460,23 @@ function tickColor(value) {
   if (value > 0) return ratio >= 0.6 ? "#009E73" : "#56B4E9";
   return ratio <= -0.6 ? "#D55E00" : "#E69F00";
 }
+function setTickUniverseSize(n) {
+  const v = Number(n);
+  if (Number.isFinite(v) && v > 0) {
+    tickUniverseSize = Math.max(1, Math.round(v));
+  } else {
+    tickUniverseSize = 0;
+  }
+  updateTickScaleBounds();
+}
+async function refreshTickUniverseSize() {
+  try {
+    const res = await fetch("/api/watchlist", { cache: "no-store" });
+    const j = await res.json();
+    const syms = Array.isArray(j?.symbols) ? j.symbols : [];
+    setTickUniverseSize(syms.length);
+  } catch {}
+}
 function updateTickReadout(value) {
   if (!tickValueEl) return;
   const v = Math.round(Number(value) || 0);
@@ -549,10 +567,13 @@ function ensureTickChart() {
 }
 function updateTickScaleBounds() {
   if (!tickChart) return;
-  const recent = tickData.slice(-240);
-  const recentMaxAbs = recent.reduce((mx, p) => Math.max(mx, Math.abs(Number(p.value) || 0)), 0);
-  const maxAbs = Math.max(recentMaxAbs, Math.abs(Number(tickCurrentValue) || 0));
-  const bound = Math.max(16, maxAbs + Math.max(4, Math.ceil(maxAbs * 0.25)));
+  const bound = Math.max(
+    1,
+    Math.round(
+      Number(tickUniverseSize) ||
+      0
+    )
+  );
   try {
     tickChart.priceScale("right").setVisibleRange({ from: -bound, to: bound });
   } catch {}
@@ -1514,6 +1535,9 @@ async function initStatus() {
     }
     syncLocalTimeMirror();
     syncTickModeUI();
+    if (typeof j?.watchlist_count === "number") {
+      setTickUniverseSize(j.watchlist_count);
+    }
     if (historyLoaded) rebuildTickFromAlerts(allAlerts);
     // NEW: Sync RVOL settings
     if (j?.rvol) {
@@ -1655,6 +1679,7 @@ function initCompact(){
   if (btnReloadWL) {
     btnReloadWL.addEventListener("click", async () => {
       await postJSON("/api/watchlist/reload", {}); // server reloads active watchlist file set
+      await refreshTickUniverseSize();
     });
   }
   // Unpin all
@@ -1778,6 +1803,7 @@ function initCompact(){
   });
   connectWS();
   initStatus().then(() => {});
+  refreshTickUniverseSize().then(() => {});
   // Keep live pane sized correctly
   window.addEventListener("resize", () => {
     recomputeFeedCapacity();
