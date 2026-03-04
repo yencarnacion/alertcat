@@ -83,6 +83,66 @@ scalpAudio.src = "/scalp.mp3";
 scalpAudio.preload = "auto";
 // ---- FMP profile cache (in this browser for the day) ----
 const profileCache = new Map(); // sym -> { marketCap:number, country:string, industry:string }
+const profileInFlight = new Map(); // sym -> Promise<profile|null>
+const extraCache = new Map(); // `${sym}|${date}|${days}` -> API payload
+const extraInFlight = new Map(); // `${sym}|${date}|${days}` -> Promise<payload>
+const PROFILE_CACHE_MAX = 600;
+const EXTRA_CACHE_MAX = 1200;
+const metaFetchMaxConcurrent = 4;
+let metaFetchInFlight = 0;
+const metaFetchQueue = [];
+
+function setBoundedCache(map, key, value, maxSize) {
+  map.set(key, value);
+  while (map.size > maxSize) {
+    const oldest = map.keys().next().value;
+    if (oldest == null) break;
+    map.delete(oldest);
+  }
+}
+
+function drainMetaFetchQueue() {
+  while (metaFetchInFlight < metaFetchMaxConcurrent && metaFetchQueue.length > 0) {
+    const item = metaFetchQueue.shift();
+    metaFetchInFlight += 1;
+    Promise.resolve()
+      .then(item.task)
+      .then(item.resolve, item.reject)
+      .finally(() => {
+        metaFetchInFlight = Math.max(0, metaFetchInFlight - 1);
+        drainMetaFetchQueue();
+      });
+  }
+}
+
+function runMetaFetchTask(task) {
+  return new Promise((resolve, reject) => {
+    metaFetchQueue.push({ task, resolve, reject });
+    drainMetaFetchQueue();
+  });
+}
+
+async function getExtra(sym, date, days = 2) {
+  const k = String(sym || "").toUpperCase();
+  const d = String(date || "");
+  if (!k || !d) return { news: [], filings: [] };
+  const key = `${k}|${d}|${days}`;
+  if (extraCache.has(key)) return extraCache.get(key);
+  if (extraInFlight.has(key)) return extraInFlight.get(key);
+
+  const req = runMetaFetchTask(async () => {
+    const res = await fetch(`/api/extra?ticker=${encodeURIComponent(k)}&date=${encodeURIComponent(d)}&days=${encodeURIComponent(days)}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const j = await res.json();
+    setBoundedCache(extraCache, key, j, EXTRA_CACHE_MAX);
+    return j;
+  }).finally(() => {
+    extraInFlight.delete(key);
+  });
+
+  extraInFlight.set(key, req);
+  return req;
+}
 // ---- UI config (from server via /api/status), with sane defaults ----
 let uiConfig = {
   tinyCapMax: 10_000_000,           // $10M
@@ -1372,7 +1432,7 @@ function sameETDate(iso, ymd) {
 }
 // NEW: scope to the specific card; ensures Live cards are populated
 async function populateNewsAndFilingsForCard(cardEl, sym) {
-  if (!cardEl) return;
+  if (!cardEl || !cardEl.isConnected) return;
   const newsUL = cardEl.querySelector('.newsList');
   const secUL  = cardEl.querySelector('.secList');
   if (!newsUL || !secUL) return;
@@ -1386,8 +1446,8 @@ async function populateNewsAndFilingsForCard(cardEl, sym) {
   }
 
   try {
-    const res = await fetch(`/api/extra?ticker=${encodeURIComponent(sym)}&date=${encodeURIComponent(d)}&days=2`, { cache: 'no-store' });
-    const j = await res.json();
+    const j = await getExtra(sym, d, 2);
+    if (!cardEl.isConnected) return;
 
     // ----- News -----
     const news = Array.isArray(j?.news) ? j.news : [];
@@ -1971,19 +2031,27 @@ async function getProfile(sym) {
   const k = String(sym || "").toUpperCase();
   if (!k) return null;
   if (profileCache.has(k)) return profileCache.get(k);
-  try {
+  if (profileInFlight.has(k)) return profileInFlight.get(k);
+
+  const req = runMetaFetchTask(async () => {
     const res = await fetch(`/api/profile?ticker=${encodeURIComponent(k)}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const j = await res.json();
     const info = {
       marketCap: Number(j?.marketCap) || 0,
       country: String(j?.country || ""),
       industry: String(j?.industry || ""),
     };
-    profileCache.set(k, info);
+    setBoundedCache(profileCache, k, info, PROFILE_CACHE_MAX);
     return info;
-  } catch {
-    return null;
-  }
+  })
+    .catch(() => null)
+    .finally(() => {
+      profileInFlight.delete(k);
+    });
+
+  profileInFlight.set(k, req);
+  return req;
 }
 function applyLiveHighlights(cardEl, info) {
   if (!cardEl || !cardEl.classList.contains('live')) return;
@@ -2007,11 +2075,12 @@ function applyLiveHighlights(cardEl, info) {
   }
 }
 async function populateProfileForCard(cardEl, sym) {
-  if (!cardEl) return;
+  if (!cardEl || !cardEl.isConnected) return;
   const priceEl = cardEl.querySelector(".price");
   if (!priceEl) return;
   try {
     const info = await getProfile(sym);
+    if (!cardEl.isConnected) return;
     if (!info) return;
     const capEl = priceEl.querySelector(".cap");
     const ctyEl = priceEl.querySelector(".country");
