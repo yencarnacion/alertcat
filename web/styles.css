@@ -46,6 +46,41 @@ body{
   padding:10px 14px; background:#0f1016; border-bottom:1px solid #1c1f25;
 }
 .topRight{ display:flex; align-items:center; gap:10px; }
+.essentialsToggle{
+  display:inline-flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 12px;
+  border-radius:12px;
+  border:1px solid #2a3a54;
+  background:#162132;
+  color:#e5f0ff;
+  font-weight:800;
+  font-size:15px;
+  line-height:1;
+  cursor:pointer;
+  user-select:none;
+}
+.essentialsToggle input{
+  width:20px;
+  height:20px;
+  accent-color:#4da6ff;
+  cursor:pointer;
+}
+.essentialsToggle:hover{ filter:brightness(1.08); }
+.essentialsInline{
+  display:none;
+  margin-bottom:10px;
+}
+body.essentials .topEssentials{
+  display:none;
+}
+body.essentials .essentialsInline{
+  display:flex;
+}
+body.essentials .topbar{
+  display:none;
+}
 .brand{ font-weight:800; letter-spacing:.3px; }
 .brand .muted{ color: var(--muted); font-weight:600; }
 .pill{ padding:5px 8px; border-radius:999px; background:var(--pill); font-size:11px; }
@@ -177,6 +212,26 @@ button:hover{ filter:brightness(1.06); }
 .col{ min-width: 0; }
 .leftCol{ }
 .rightCol{ position: relative; }
+body.essentials .container{
+  margin-top:10px;
+}
+body.essentials .controls{
+  display:none !important;
+}
+body.essentials .split{
+  grid-template-columns: 1fr;
+  margin-top:0;
+  min-height: calc(100vh - 12px);
+}
+body.essentials .leftCol{
+  display:none !important;
+}
+body.essentials .tabRow{
+  display:none;
+}
+body.essentials #alertsWrap{
+  display:none !important;
+}
 .rightTabs{ display:flex; flex-direction:column; gap:10px; }
 .tabHeader{
   display:flex;

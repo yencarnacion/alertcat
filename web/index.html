@@ -12,6 +12,10 @@
   <header class="topbar">
     <div class="brand">alertcat</div>
     <div class="topRight">
+      <label class="essentialsToggle topEssentials" title="Show only Synthetic TICK + Live Alerts">
+        <input id="chkEssentialsTop" type="checkbox"/>
+        <span>Essentials</span>
+      </label>
       <button id="soundBtn" class="primary">Enable sound</button>
       <span id="soundState" class="muted">Sound ON</span>
       <div id="status" class="pill">Disconnected</div>
@@ -146,6 +150,12 @@
       <!-- RIGHT: tabbed panel (Live Alerts / RVOL table) -->
       <div class="col rightCol">
         <section id="tickPanel" class="panel tickPanel" aria-label="Synthetic TICK breadth">
+          <div class="essentialsInline">
+            <label class="essentialsToggle tickEssentials" title="Exit essentials mode">
+              <input id="chkEssentialsTick" type="checkbox"/>
+              <span>Essentials Mode</span>
+            </label>
+          </div>
           <div class="tickTop">
             <div>
               <div class="title">Synthetic TICK Breadth</div>

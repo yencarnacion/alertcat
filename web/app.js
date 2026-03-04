@@ -7,6 +7,8 @@ const tabLiveBtn = document.getElementById("tabLiveBtn");
 const tabRvolBtn = document.getElementById("tabRvolBtn");
 const soundBtn = document.getElementById("soundBtn");
 const soundState = document.getElementById("soundState");
+const chkEssentialsTop = document.getElementById("chkEssentialsTop");
+const chkEssentialsTick = document.getElementById("chkEssentialsTick");
 
 // Separate fallbacks for up/down
 const fallbackAudioUp = document.getElementById("alertAudioUp");
@@ -104,6 +106,7 @@ const chartLookbackMinDefault = 120;
 let chartLookbackMin = chartLookbackMinDefault;
 const chartRefreshMs = 15000;
 const RIGHT_TAB_STORAGE_KEY = "alertcat.right_tab";
+const ESSENTIALS_STORAGE_KEY = "alertcat.essentials";
 // --- Pinning (persisted in this browser) ---
 const pinLimit = 6;
 let pinnedOrder = []; // array of ids (in pin insertion order)
@@ -1593,6 +1596,28 @@ function initCompact(){
   if (chkCompact) chkCompact.checked = on;
   setCompact(on);
 }
+/* ------------ Essentials mode toggle (persisted) ------------ */
+function setEssentials(on){
+  const enabled = !!on;
+  document.body.classList.toggle("essentials", enabled);
+  if (chkEssentialsTop) chkEssentialsTop.checked = enabled;
+  if (chkEssentialsTick) chkEssentialsTick.checked = enabled;
+  if (enabled) setRightTab("live");
+  try { localStorage.setItem(ESSENTIALS_STORAGE_KEY, enabled ? "1" : "0"); } catch {}
+  recomputeFeedCapacity();
+  recomputeLiveCapacity();
+}
+function initEssentials(){
+  let on = false;
+  try {
+    const saved = localStorage.getItem(ESSENTIALS_STORAGE_KEY);
+    on = saved === "1";
+  } catch {}
+  const p = getParam("essentials");
+  if (p === "1") on = true;
+  if (p === "0") on = false;
+  setEssentials(on);
+}
 // ----------------- Init & wiring -----------------
 (function init(){
   setStatus("Loading…");
@@ -1607,11 +1632,22 @@ function initCompact(){
   // Compact mode first so layout is set before initial renders
   initCompact();
   initRightTabs();
+  initEssentials();
   syncTickModeUI();
   ensureTickChart();
   resetTickChart();
   if (chkCompact) {
     chkCompact.addEventListener('change', (e) => setCompact(!!e.target.checked));
+  }
+  if (chkEssentialsTop) {
+    chkEssentialsTop.addEventListener("change", (e) => {
+      setEssentials(!!e.target.checked);
+    });
+  }
+  if (chkEssentialsTick) {
+    chkEssentialsTick.addEventListener("change", (e) => {
+      setEssentials(!!e.target.checked);
+    });
   }
   dateInput.value = todayISO();
   syncLevelsModeUI();
