@@ -24,6 +24,13 @@
   --oi-vermillion:#D55E00;
   --oi-reddishpurple:#CC79A7;
   --oi-blue:#0072B2;
+  --tick-pos-strong: var(--oi-bluishgreen);
+  --tick-pos-mild: var(--oi-skyblue);
+  --tick-neg-strong: var(--oi-vermillion);
+  --tick-neg-mild: var(--oi-orange);
+  --tick-neutral: #8d95a6;
+  --tick-zero: #b9c4dd;
+  --tick-stack-offset: 380px;
 }
 :root { color-scheme: dark; }
 *{ box-sizing: border-box; }
@@ -51,6 +58,72 @@ body{
 }
 /* Make settings block a bit tighter (no font size change) */
 .panel.controls{ padding:10px; }
+.tickPanel{
+  margin-top: 12px;
+  padding: 10px 12px;
+}
+.tickTop{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:8px;
+}
+.tickFormula{
+  font-size:12px;
+}
+.tickReadout{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.tickModeBadge{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:5px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:800;
+  letter-spacing:.2px;
+  background:#1a2433;
+  border:1px solid #2d3f57;
+  color:#d7e8ff;
+}
+.tickModeBadge.local{
+  background:#1f2a1d;
+  border-color:#325331;
+  color:#dcf4d7;
+}
+.tickValue{
+  min-width:82px;
+  text-align:right;
+  font-variant-numeric: tabular-nums;
+  font-size:30px;
+  font-weight:900;
+  line-height:1;
+}
+.tickValue.positive{ color:var(--tick-pos-strong); }
+.tickValue.negative{ color:var(--tick-neg-strong); }
+.tickValue.neutral{ color:var(--tick-neutral); }
+.tickChart{
+  width:100%;
+  height:220px;
+  border:1px solid #202534;
+  border-radius:8px;
+  background:linear-gradient(180deg, #101622 0%, #0f131d 100%);
+}
+.tickScaleHint{
+  margin-top:8px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  font-size:12px;
+}
+.tickLegendPos{ color:var(--tick-pos-strong); font-weight:700; }
+.tickLegendZero{ color:var(--tick-zero); font-weight:700; }
+.tickLegendNeg{ color:var(--tick-neg-strong); font-weight:700; }
 .intro{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .controls{ display:flex; flex-wrap: wrap; gap:12px; align-items:flex-end; }
 .field{ display:flex; flex-direction:column; gap:6px; min-width: 220px; }
@@ -99,6 +172,7 @@ button:hover{ filter:brightness(1.06); }
   gap:12px;
   align-items:start;
   margin-top: 12px;
+  min-height: clamp(360px, calc(100vh - var(--tick-stack-offset)), 100vh);
 }
 .col{ min-width: 0; }
 .leftCol{ }
@@ -399,6 +473,9 @@ button:hover{ filter:brightness(1.06); }
   .liveNowCluster{ margin-left:auto; }
   .liveNowTime{ min-width:66px; padding:10px 10px; font-size:15px; }
   .liveNowBtn{ min-width:84px; padding:10px 16px; }
+  .tickTop{ flex-direction:column; }
+  .tickReadout{ width:100%; justify-content:space-between; }
+  .tickChart{ height:190px; }
 }
 /* ===========================
    COMPACT MODE (toggleable)

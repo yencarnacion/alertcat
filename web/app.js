@@ -40,6 +40,11 @@ const bucketSize = document.getElementById("bucketSize");
 // NEW Recent Alerts
 const alertsTableBody = document.querySelector("#alertsTable tbody");
 const alertsCount = document.getElementById("alertsCount");
+// Synthetic TICK panel
+const tickPanel = document.getElementById("tickPanel");
+const tickChartEl = document.getElementById("tickChart");
+const tickValueEl = document.getElementById("tickValue");
+const tickModeBadge = document.getElementById("tickModeBadge");
 // NEW: table head + sort state (per-minute sort)
 const alertsTableHead = document.querySelector("#alertsTable thead");
 let alertsSortState = { key: "volume", dir: "desc" }; // default: volume desc per minute
@@ -62,6 +67,13 @@ let allAlerts = []; // [{kind, sym, name, sources, price, time, ts_unix}]
 let recentAlerts = []; // for RVOL [{time, symbol, price, volume, baseline, rvol, method}]
 let silent = false;
 let sessionDateET = ""; // YYYY-MM-DD (from /api/status)
+const TICK_HISTORY_LIMIT = 2400;
+const tickDirsBySymbol = new Map(); // sym -> -1 | 1
+let tickSeries = null;
+let tickChart = null;
+let tickRO = null;
+let tickData = []; // [{time, value, color}]
+let tickCurrentValue = 0;
 const scalpAudio = document.createElement("audio");
 scalpAudio.src = "/scalp.mp3";
 scalpAudio.preload = "auto";
@@ -334,13 +346,15 @@ function currentLocalTimeInput() {
   syncLocalTimeMirror(fallback);
   return fallback;
 }
-async function applyLiveSettings() {
+async function applyLiveSettings(opts = {}) {
+  const resetTick = !!opts.resetTick;
   const date = (dateInput.value || sessionDateET || todayISO()).trim();
   const session = selectedSession();
   const levelsMode = selectedLevelsMode();
   const localTime = currentLocalTimeInput();
   const localEnabled = !!(chkLocalHigh?.checked || chkLocalLow?.checked);
   sessionDateET = date;
+  if (resetTick) resetTickForContextChange();
   if (!streamRunning) return;
   const j = await postJSON("/api/stream", {
     mode: "update",
@@ -414,6 +428,203 @@ function initRightTabs() {
   setRightTab(tab);
   tabLiveBtn.addEventListener("click", () => setRightTab("live"));
   tabRvolBtn.addEventListener("click", () => setRightTab("rvol"));
+}
+function tickModeInfo(mode = selectedLevelsMode()) {
+  if (mode === "local") {
+    return {
+      label: "Local High/Low",
+      badgeClass: "local",
+      upKind: "lhigh",
+      downKind: "llow",
+    };
+  }
+  return {
+    label: "Session HOD/LOD",
+    badgeClass: "",
+    upKind: "hod",
+    downKind: "lod",
+  };
+}
+function syncTickModeUI() {
+  if (!tickModeBadge) return;
+  const info = tickModeInfo();
+  tickModeBadge.textContent = info.label;
+  tickModeBadge.classList.toggle("local", info.badgeClass === "local");
+}
+function tickColor(value) {
+  const universe = Math.max(1, tickDirsBySymbol.size);
+  const ratio = value / universe;
+  if (value === 0) return "#8d95a6";
+  if (value > 0) return ratio >= 0.6 ? "#009E73" : "#56B4E9";
+  return ratio <= -0.6 ? "#D55E00" : "#E69F00";
+}
+function updateTickReadout(value) {
+  if (!tickValueEl) return;
+  const v = Math.round(Number(value) || 0);
+  tickValueEl.textContent = `${v > 0 ? "+" : ""}${v}`;
+  tickValueEl.classList.remove("positive", "negative", "neutral");
+  tickValueEl.classList.add(v > 0 ? "positive" : (v < 0 ? "negative" : "neutral"));
+}
+function syncSplitViewportBudget() {
+  const panelH = tickPanel ? Math.ceil(tickPanel.getBoundingClientRect().height) : 320;
+  const offset = Math.max(260, panelH + 20);
+  document.documentElement.style.setProperty("--tick-stack-offset", `${offset}px`);
+}
+function ensureTickChart() {
+  if (!tickChartEl || tickChart) {
+    syncSplitViewportBudget();
+    return;
+  }
+  const LWC = (typeof window !== "undefined") ? window.LightweightCharts : null;
+  if (!LWC || typeof LWC.createChart !== "function") {
+    syncSplitViewportBudget();
+    return;
+  }
+  const width = tickChartEl.clientWidth || 320;
+  const height = tickChartEl.clientHeight || 220;
+  tickChart = LWC.createChart(tickChartEl, {
+    width,
+    height,
+    layout: { background: { type: "solid", color: "#0f131d" }, textColor: "#d6dfef" },
+    grid: {
+      vertLines: { color: "rgba(155, 170, 195, 0.08)" },
+      horzLines: { color: "rgba(155, 170, 195, 0.12)" },
+    },
+    crosshair: { mode: 0 },
+    timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false, rightOffset: 3 },
+    rightPriceScale: {
+      borderVisible: false,
+      autoScale: false,
+      scaleMargins: { top: 0.15, bottom: 0.15 },
+    },
+    localization: {
+      priceFormatter: (price) => {
+        const v = Math.round(Number(price) || 0);
+        return `${v > 0 ? "+" : ""}${v}`;
+      },
+    },
+  });
+  tickSeries = tickChart.addHistogramSeries({
+    base: 0,
+    color: "#8d95a6",
+    lastValueVisible: false,
+    priceLineVisible: false,
+    priceFormat: { type: "price", precision: 0, minMove: 1 },
+  });
+  if (tickSeries && typeof tickSeries.createPriceLine === "function") {
+    tickSeries.createPriceLine({
+      price: 0,
+      color: "#b9c4dd",
+      lineWidth: 1,
+      lineStyle: 2,
+      axisLabelVisible: true,
+      title: "0",
+    });
+  }
+  if (tickRO) {
+    try { tickRO.disconnect(); } catch {}
+    tickRO = null;
+  }
+  if (typeof ResizeObserver === "function") {
+    tickRO = new ResizeObserver(() => {
+      if (!tickChart || !tickChartEl) return;
+      tickChart.applyOptions({
+        width: tickChartEl.clientWidth || 320,
+        height: tickChartEl.clientHeight || 220,
+      });
+      syncSplitViewportBudget();
+    });
+    tickRO.observe(tickChartEl);
+  }
+  syncSplitViewportBudget();
+}
+function updateTickScaleBounds() {
+  if (!tickChart) return;
+  const maxAbs = tickData.reduce((mx, p) => Math.max(mx, Math.abs(Number(p.value) || 0)), 0);
+  const bound = Math.max(4, maxAbs + Math.max(2, Math.ceil(maxAbs * 0.2)));
+  try {
+    tickChart.priceScale("right").setVisibleRange({ from: -bound, to: bound });
+  } catch {}
+}
+function drawTickSeries(fit = false) {
+  ensureTickChart();
+  if (!tickSeries) return;
+  tickSeries.setData(tickData);
+  updateTickScaleBounds();
+  if (tickChart) {
+    if (fit) tickChart.timeScale().fitContent();
+    else tickChart.timeScale().scrollToRealTime();
+  }
+}
+function resetTickChart() {
+  tickDirsBySymbol.clear();
+  tickData = [];
+  tickCurrentValue = 0;
+  updateTickReadout(0);
+  drawTickSeries(true);
+}
+function tickEpochSeconds(alertObj) {
+  const ms = Number(alertObj?.ts_unix);
+  if (Number.isFinite(ms) && ms > 0) return Math.floor(ms / 1000);
+  return Math.floor(Date.now() / 1000);
+}
+function applyTickTransition(alertObj) {
+  const kind = String(alertObj?.kind || "").toLowerCase();
+  const sym = String(alertObj?.sym || "").trim().toUpperCase();
+  if (!sym || !kind) return null;
+  const info = tickModeInfo();
+  const nextDir = kind === info.upKind ? 1 : (kind === info.downKind ? -1 : 0);
+  if (!nextDir) return null;
+
+  const prevDir = tickDirsBySymbol.get(sym) || 0;
+  if (prevDir === nextDir) return null;
+
+  tickDirsBySymbol.set(sym, nextDir);
+  tickCurrentValue += (nextDir - prevDir);
+  return { time: tickEpochSeconds(alertObj), value: tickCurrentValue };
+}
+function appendTickPoint(point, redraw = true) {
+  if (!point || !Number.isFinite(point.time)) return;
+  const color = tickColor(point.value);
+  const normalized = {
+    time: Math.max(1, Math.floor(point.time)),
+    value: Math.round(Number(point.value) || 0),
+    color,
+  };
+  const n = tickData.length;
+  if (n > 0 && tickData[n - 1].time === normalized.time) {
+    tickData[n - 1] = normalized;
+  } else {
+    tickData.push(normalized);
+    if (tickData.length > TICK_HISTORY_LIMIT) {
+      tickData = tickData.slice(tickData.length - TICK_HISTORY_LIMIT);
+    }
+  }
+  updateTickReadout(normalized.value);
+  if (redraw) drawTickSeries(false);
+}
+function ingestTickAlert(alertObj, redraw = true) {
+  const point = applyTickTransition(alertObj);
+  if (!point) return;
+  appendTickPoint(point, redraw);
+}
+function rebuildTickFromAlerts(alerts) {
+  tickDirsBySymbol.clear();
+  tickData = [];
+  tickCurrentValue = 0;
+  const ordered = Array.isArray(alerts) ? alerts.slice() : [];
+  ordered.sort((a, b) => Number(a?.ts_unix || 0) - Number(b?.ts_unix || 0));
+  for (const a of ordered) {
+    ingestTickAlert(a, false);
+  }
+  if (tickData.length === 0) {
+    appendTickPoint({ time: Math.floor(Date.now() / 1000), value: 0 }, false);
+  }
+  drawTickSeries(true);
+}
+function resetTickForContextChange() {
+  syncTickModeUI();
+  resetTickChart();
 }
 function shouldShow(kind){
   const hodOn = !!chkHod?.checked;
@@ -673,6 +884,7 @@ function trimLive() {
 }
 function recomputeLiveCapacity() {
   if (!liveFeed) return;
+  syncSplitViewportBudget();
   if (liveWrap && liveWrap.hasAttribute("hidden")) return;
   // Make sure the container has a precise height that fits the viewport.
   const boxTop = liveFeed.getBoundingClientRect().top;
@@ -720,6 +932,7 @@ function renderAll(){
 }
 function addIncomingAlert(a){
   allAlerts.push(a);
+  ingestTickAlert(a);
   // Prevent infinite memory growth in array
   if (allAlerts.length > HISTORY_LIMIT) {
     allAlerts.shift();
@@ -1157,6 +1370,7 @@ function connectWS() {
         historyLoaded = true;
         allAlerts = msg.alerts.slice(); // oldest -> newest
         renderAll();
+        rebuildTickFromAlerts(allAlerts);
         return;
       }
       if (msg.type === "alert") {
@@ -1249,6 +1463,8 @@ async function initStatus() {
       setLevelsMode("session");
     }
     syncLocalTimeMirror();
+    syncTickModeUI();
+    if (historyLoaded) rebuildTickFromAlerts(allAlerts);
     // NEW: Sync RVOL settings
     if (j?.rvol) {
       rvolThreshold.value = j.rvol.threshold || 2.0;
@@ -1289,6 +1505,7 @@ function setCompact(on){
   try { localStorage.setItem('alertcat.compact', on ? '1' : '0'); } catch {}
   chartsLimit = on ? 2 : 5; // fewer auto-charts in compact mode
   renderAll(); // re-render to apply density + limits
+  syncSplitViewportBudget();
 }
 function initCompact(){
   let on = false;
@@ -1315,6 +1532,9 @@ function initCompact(){
   // Compact mode first so layout is set before initial renders
   initCompact();
   initRightTabs();
+  syncTickModeUI();
+  ensureTickChart();
+  resetTickChart();
   if (chkCompact) {
     chkCompact.addEventListener('change', (e) => setCompact(!!e.target.checked));
   }
@@ -1350,6 +1570,7 @@ function initCompact(){
     sessionDateET = date;
     // keep pins; they will re-render when history arrives
     renderAll();
+    resetTickForContextChange();
   });
   // Stop
   btnStop.addEventListener("click", async () => {
@@ -1379,6 +1600,7 @@ function initCompact(){
     renderRecentAlerts(); // NEW
     try { await postJSON("/api/clear", {}); } catch {}
     renderAll();
+    resetTickForContextChange();
   });
   // Reload watchlist (NEW)
   if (btnReloadWL) {
@@ -1401,41 +1623,41 @@ function initCompact(){
   levelsModeRadios.forEach(el => {
     el.addEventListener("change", async () => {
       syncLevelsModeUI();
-      await applyLiveSettings();
+      await applyLiveSettings({ resetTick: true });
     });
   });
   if (chkLocalHigh) {
     chkLocalHigh.addEventListener("change", async () => {
       renderAll();
-      await applyLiveSettings();
+      await applyLiveSettings({ resetTick: true });
     });
   }
   if (chkLocalLow) {
     chkLocalLow.addEventListener("change", async () => {
       renderAll();
-      await applyLiveSettings();
+      await applyLiveSettings({ resetTick: true });
     });
   }
   if (localTimeInput) {
     localTimeInput.addEventListener("change", async () => {
       localTimeInput.value = currentLocalTimeInput();
-      await applyLiveSettings();
+      await applyLiveSettings({ resetTick: true });
     });
   }
   if (btnApplyLive) {
     btnApplyLive.addEventListener("click", async () => {
-      await applyLiveSettings();
+      await applyLiveSettings({ resetTick: true });
       if (!streamRunning) {
         setStatus("Settings ready. Press Start to run.", true);
       }
     });
   }
   dateInput.addEventListener("change", async () => {
-    await applyLiveSettings();
+    await applyLiveSettings({ resetTick: true });
   });
   document.querySelectorAll('input[name="session"]').forEach(el => {
     el.addEventListener("change", async () => {
-      await applyLiveSettings();
+      await applyLiveSettings({ resetTick: true });
     });
   });
   if (sessionQuickBtns && sessionQuickBtns.length > 0) {
@@ -1449,7 +1671,7 @@ function initCompact(){
           if (radio) radio.checked = true;
         }
         if (t && localTimeInput) localTimeInput.value = t;
-        await applyLiveSettings();
+        await applyLiveSettings({ resetTick: true });
       });
     });
   }
@@ -1474,7 +1696,7 @@ function initCompact(){
           if (radio) radio.checked = true;
         }
         if (t && localTimeInput) localTimeInput.value = t;
-        await applyLiveSettings();
+        await applyLiveSettings({ resetTick: true });
       });
     });
   }
