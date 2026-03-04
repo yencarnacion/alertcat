@@ -151,15 +151,18 @@
               <button id="tabLiveBtn" type="button" class="tabBtn isActive" role="tab" aria-controls="liveWrap" aria-selected="true">Live Alerts</button>
               <button id="tabRvolBtn" type="button" class="tabBtn" role="tab" aria-controls="alertsWrap" aria-selected="false">RVOL Table</button>
             </div>
-            <button
-              id="btnLiveNow"
-              type="button"
-              class="liveNowBtn localPreset"
-              data-time="now"
-              title="Set Local Anchor Time to now (ET)"
-            >
-              Now
-            </button>
+            <div class="liveNowCluster">
+              <span id="liveNowTime" class="liveNowTime" aria-label="Local Anchor Time duplicate">09:30</span>
+              <button
+                id="btnLiveNow"
+                type="button"
+                class="liveNowBtn localPreset"
+                data-time="now"
+                title="Set Local Anchor Time to now (ET)"
+              >
+                Now
+              </button>
+            </div>
           </div>
 
           <section id="liveWrap" class="tabPane" role="tabpanel" aria-live="polite">

@@ -109,6 +109,12 @@ button:hover{ filter:brightness(1.06); }
   align-items:center;
   gap:12px;
 }
+.liveNowCluster{
+  margin-left:auto;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
 .tabRow{ display:flex; gap:8px; flex-wrap:wrap; }
 .tabBtn{
   background:#0f1016;
@@ -124,7 +130,6 @@ button:hover{ filter:brightness(1.06); }
   color:#fff;
 }
 .liveNowBtn{
-  margin-left:auto;
   min-width:96px;
   padding:11px 20px;
   border-radius:12px;
@@ -135,6 +140,20 @@ button:hover{ filter:brightness(1.06); }
   font-weight:800;
   letter-spacing:.2px;
   transition:background-color .12s ease, border-color .12s ease, box-shadow .12s ease, transform .06s ease;
+}
+.liveNowTime{
+  min-width:72px;
+  padding:11px 12px;
+  border-radius:10px;
+  border:1px solid #313748;
+  background:#0f1016;
+  color:#dbe7ff;
+  font-size:16px;
+  font-weight:800;
+  font-variant-numeric:tabular-nums;
+  text-align:center;
+  letter-spacing:.3px;
+  user-select:none;
 }
 .liveNowBtn:hover,
 .liveNowBtn:focus-visible{
@@ -377,7 +396,9 @@ button:hover{ filter:brightness(1.06); }
   .field-anchor{ min-width: 100%; }
   .anchor-input-row{ flex-wrap:wrap; }
   .tabHeader{ flex-wrap:wrap; }
-  .liveNowBtn{ margin-left:auto; min-width:84px; padding:10px 16px; }
+  .liveNowCluster{ margin-left:auto; }
+  .liveNowTime{ min-width:66px; padding:10px 10px; font-size:15px; }
+  .liveNowBtn{ min-width:84px; padding:10px 16px; }
 }
 /* ===========================
    COMPACT MODE (toggleable)

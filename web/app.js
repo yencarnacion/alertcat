@@ -25,6 +25,7 @@ const chkLocalLow = document.getElementById("chkLocalLow");
 const chkCompact = document.getElementById("chkCompact"); // NEW
 const chkScalps = document.getElementById("chkScalps");
 const localTimeInput = document.getElementById("localTimeInput");
+const liveNowTime = document.getElementById("liveNowTime");
 const levelsModeRadios = document.querySelectorAll('input[name="levelsMode"]');
 const sessionQuickBtns = document.querySelectorAll(".sessionQuick");
 const localPresetBtns = document.querySelectorAll(".localPreset");
@@ -316,12 +317,21 @@ function hourStartET() {
   if (!p) return "09:00";
   return `${String(p.h).padStart(2, "0")}:00`;
 }
+function syncLocalTimeMirror(raw) {
+  if (!liveNowTime) return;
+  const normalized = normalizeHHMM(raw || localTimeInput?.value || "");
+  liveNowTime.textContent = normalized || "09:30";
+}
 function currentLocalTimeInput() {
   const session = selectedSession();
   const normalized = normalizeHHMM(localTimeInput?.value || "");
-  if (normalized) return normalized;
+  if (normalized) {
+    syncLocalTimeMirror(normalized);
+    return normalized;
+  }
   const fallback = defaultLocalTimeForSession(session);
   if (localTimeInput) localTimeInput.value = fallback;
+  syncLocalTimeMirror(fallback);
   return fallback;
 }
 async function applyLiveSettings() {
@@ -1238,6 +1248,7 @@ async function initStatus() {
       if (localTimeInput && !normalizeHHMM(localTimeInput.value)) localTimeInput.value = fallback;
       setLevelsMode("session");
     }
+    syncLocalTimeMirror();
     // NEW: Sync RVOL settings
     if (j?.rvol) {
       rvolThreshold.value = j.rvol.threshold || 2.0;
@@ -1309,6 +1320,7 @@ function initCompact(){
   }
   dateInput.value = todayISO();
   syncLevelsModeUI();
+  syncLocalTimeMirror();
   // Start
   btnStart.addEventListener("click", async () => {
     const date = (dateInput.value || "").trim();
