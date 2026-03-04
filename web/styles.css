@@ -104,6 +104,11 @@ button:hover{ filter:brightness(1.06); }
 .leftCol{ }
 .rightCol{ position: relative; }
 .rightTabs{ display:flex; flex-direction:column; gap:10px; }
+.tabHeader{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
 .tabRow{ display:flex; gap:8px; flex-wrap:wrap; }
 .tabBtn{
   background:#0f1016;
@@ -117,6 +122,34 @@ button:hover{ filter:brightness(1.06); }
   background:var(--blue);
   border-color:var(--blue);
   color:#fff;
+}
+.liveNowBtn{
+  margin-left:auto;
+  min-width:96px;
+  padding:11px 20px;
+  border-radius:12px;
+  border:1px solid #3b7f55;
+  background:#19422d;
+  color:#e4ffed;
+  font-size:16px;
+  font-weight:800;
+  letter-spacing:.2px;
+  transition:background-color .12s ease, border-color .12s ease, box-shadow .12s ease, transform .06s ease;
+}
+.liveNowBtn:hover,
+.liveNowBtn:focus-visible{
+  background:#22a05e;
+  border-color:#8bf1b9;
+  color:#ffffff;
+  box-shadow:0 0 0 1px rgba(139, 241, 185, 0.45), 0 0 22px rgba(34, 160, 94, 0.38);
+  animation:nowBtnFlash .5s ease-in-out infinite alternate;
+}
+.liveNowBtn:active{
+  transform:translateY(1px);
+}
+@keyframes nowBtnFlash {
+  from { filter:brightness(1); }
+  to { filter:brightness(1.2); }
 }
 .tabPane{ min-width:0; }
 .tabPane[hidden]{ display:none !important; }
@@ -343,6 +376,8 @@ button:hover{ filter:brightness(1.06); }
   .chartBox{ width: 130px; height: 130px; }
   .field-anchor{ min-width: 100%; }
   .anchor-input-row{ flex-wrap:wrap; }
+  .tabHeader{ flex-wrap:wrap; }
+  .liveNowBtn{ margin-left:auto; min-width:84px; padding:10px 16px; }
 }
 /* ===========================
    COMPACT MODE (toggleable)
