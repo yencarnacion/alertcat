@@ -875,17 +875,25 @@ function buildAlertCard(a, autoChart=false, isPinned=false, isLive=false) {
         // Show box BEFORE creating chart so sizing works
         card.querySelector('.chartBox').classList.remove('disabled');
         await ensureUnderLimitThenSpawn(id, a.sym);
-        btn.textContent = "Disable chart";
-        btn.classList.add('active');
+        const enabled = chartsById.has(id);
+        btn.textContent = enabled ? "Disable chart" : "Enable chart";
+        btn.classList.toggle('active', enabled);
+        if (!enabled) card.querySelector('.chartBox').classList.add('disabled');
       }
     });
   }
   if (autoChart && btn) {
     setTimeout(async () => {
+      if (!card.isConnected) return;
       // Show box BEFORE creating chart so sizing works
       card.querySelector('.chartBox').classList.remove('disabled');
       await ensureUnderLimitThenSpawn(id, a.sym);
+      if (!chartsById.has(id)) {
+        card.querySelector('.chartBox').classList.add('disabled');
+        return;
+      }
       const tbtn = card.querySelector('button.toggleChart');
+      if (!tbtn) return;
       tbtn.textContent = "Disable chart";
       tbtn.classList.add('active');
     }, 0);
@@ -1183,6 +1191,7 @@ function addRvolAlert(msg) {
 // ----------------- Mini charts -----------------
 async function ensureUnderLimitThenSpawn(id, sym) {
   if (chartsById.has(id)) return;
+  pruneActiveChartQueue();
   if (activeChartQueue.length >= chartsLimit) {
     // Prefer to evict a non-pinned chart first
     let evictId = activeChartQueue.find(x => !isPinnedId(x));
@@ -1192,29 +1201,37 @@ async function ensureUnderLimitThenSpawn(id, sym) {
     }
     if (evictId) destroyChart(evictId);
   }
-  await spawnChart(id, sym);
-  activeChartQueue.push(id);
+  const created = await spawnChart(id, sym);
+  if (!created) return;
+  if (!activeChartQueue.includes(id)) activeChartQueue.push(id);
+}
+function pruneActiveChartQueue() {
+  for (let i = activeChartQueue.length - 1; i >= 0; i--) {
+    if (!chartsById.has(activeChartQueue[i])) {
+      activeChartQueue.splice(i, 1);
+    }
+  }
 }
 function destroyChart(id) {
   if (!id) return;
+  const idx = activeChartQueue.indexOf(id);
+  if (idx >= 0) activeChartQueue.splice(idx, 1);
   const rec = chartsById.get(id);
   if (!rec) return;
   try { if (rec.timer) clearInterval(rec.timer); } catch {}
   try { if (rec.ro) rec.ro.disconnect(); } catch {}
   try { rec.chart.remove(); } catch {}
   chartsById.delete(id);
-  const idx = activeChartQueue.indexOf(id);
-  if (idx >= 0) activeChartQueue.splice(idx, 1);
 }
 async function spawnChart(id, sym) {
   const box = document.getElementById(`chart_${id}`);
-  if (!box) return;
+  if (!box) return false;
   // Guard: library present?
   const LWC = (typeof window !== 'undefined') ? window.LightweightCharts : null;
   if (!LWC || typeof LWC.createChart !== 'function') {
     console.error('[mini-chart]', 'LightweightCharts not loaded; check <script> tag or network.');
     setStatus('Charts library failed to load', false);
-    return;
+    return false;
   }
   // Show dimension debug just in case
   const w = box.clientWidth || 150;
@@ -1249,7 +1266,7 @@ async function spawnChart(id, sym) {
   } else {
     console.error('[mini-chart]', 'No candlestick API on chart object:', chart);
     setStatus('Chart API mismatch', false);
-    return;
+    return false;
   }
   async function loadBars(atMs) {
     const lookback = chartLookbackMin || 120;
@@ -1288,6 +1305,7 @@ async function spawnChart(id, sym) {
     ro.observe(box);
   }
   chartsById.set(id, { chart, series, container: box, timer, ro });
+  return true;
 }
 // ----------------- News + SEC -----------------
 function sameETDate(iso, ymd) {
