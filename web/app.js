@@ -477,6 +477,10 @@ async function refreshTickUniverseSize() {
     setTickUniverseSize(syms.length);
   } catch {}
 }
+function tickYAxisBound() {
+  const v = Math.round(Number(tickUniverseSize) || 0);
+  return Math.max(1, v);
+}
 function updateTickReadout(value) {
   if (!tickValueEl) return;
   const v = Math.round(Number(value) || 0);
@@ -511,7 +515,7 @@ function ensureTickChart() {
     },
     rightPriceScale: {
       borderVisible: false,
-      autoScale: false,
+      autoScale: true,
       scaleMargins: { top: 0.15, bottom: 0.15 },
     },
     localization: {
@@ -566,16 +570,14 @@ function ensureTickChart() {
   }
 }
 function updateTickScaleBounds() {
-  if (!tickChart) return;
-  const bound = Math.max(
-    1,
-    Math.round(
-      Number(tickUniverseSize) ||
-      0
-    )
-  );
+  if (!tickSeries || !tickLineSeries) return;
+  const bound = tickYAxisBound();
+  const fixedRangeProvider = () => ({
+    priceRange: { minValue: -bound, maxValue: bound },
+  });
   try {
-    tickChart.priceScale("right").setVisibleRange({ from: -bound, to: bound });
+    tickSeries.applyOptions({ autoscaleInfoProvider: fixedRangeProvider });
+    tickLineSeries.applyOptions({ autoscaleInfoProvider: fixedRangeProvider });
   } catch {}
 }
 function updateTickVisibleRange() {
