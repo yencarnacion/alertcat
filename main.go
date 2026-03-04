@@ -1786,9 +1786,15 @@ func main() {
 			}
 		case "set_rvol_active":
 			b, _ := ctrl.Value.(bool)
+			wasActive := false
 			rvm.mu.Lock()
+			wasActive = rvm.active
 			rvm.active = b
 			rvm.mu.Unlock()
+			if b && !wasActive {
+				syms, _, _ := getWatchSnapshot()
+				go rvm.loadBaselines(syms)
+			}
 			select {
 			case cl.out <- statusMsg{Type: "status", Level: "success", Text: fmt.Sprintf("RVOL %v", map[bool]string{true: "enabled", false: "disabled"}[b])}:
 			default:
@@ -2025,7 +2031,8 @@ func main() {
 			// RVOL
 			rvm.setSession(dt, sess)
 			rvm.resetIntradayState()
-			rvm.loadBaselines(streamSymbols) // load baselines for current watchlist
+			// Do not block stream startup on RVOL warmup (can be slow if API is timing out).
+			go rvm.loadBaselines(copyStringSlice(streamSymbols))
 
 			localCfgMu.Lock()
 			localAnchorClock = localClock
