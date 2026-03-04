@@ -30,7 +30,6 @@
   --tick-neg-mild: var(--oi-orange);
   --tick-neutral: #8d95a6;
   --tick-zero: #b9c4dd;
-  --tick-stack-offset: 380px;
 }
 :root { color-scheme: dark; }
 *{ box-sizing: border-box; }
@@ -59,7 +58,7 @@ body{
 /* Make settings block a bit tighter (no font size change) */
 .panel.controls{ padding:10px; }
 .tickPanel{
-  margin-top: 12px;
+  margin: 0 0 12px;
   padding: 10px 12px;
 }
 .tickTop{
@@ -108,7 +107,7 @@ body{
 .tickValue.neutral{ color:var(--tick-neutral); }
 .tickChart{
   width:100%;
-  height:220px;
+  height:165px;
   border:1px solid #202534;
   border-radius:8px;
   background:linear-gradient(180deg, #101622 0%, #0f131d 100%);
@@ -172,7 +171,6 @@ button:hover{ filter:brightness(1.06); }
   gap:12px;
   align-items:start;
   margin-top: 12px;
-  min-height: clamp(360px, calc(100vh - var(--tick-stack-offset)), 100vh);
 }
 .col{ min-width: 0; }
 .leftCol{ }
@@ -475,7 +473,7 @@ button:hover{ filter:brightness(1.06); }
   .liveNowBtn{ min-width:84px; padding:10px 16px; }
   .tickTop{ flex-direction:column; }
   .tickReadout{ width:100%; justify-content:space-between; }
-  .tickChart{ height:190px; }
+  .tickChart{ height:145px; }
 }
 /* ===========================
    COMPACT MODE (toggleable)

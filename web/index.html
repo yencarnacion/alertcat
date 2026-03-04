@@ -127,24 +127,6 @@
         <button id="btnReloadWl" title="Reload watchlist.yaml">Reload watchlist</button>
       </div>
     </section>
-    <section id="tickPanel" class="panel tickPanel" aria-label="Synthetic TICK breadth">
-      <div class="tickTop">
-        <div>
-          <div class="title">Synthetic TICK Breadth</div>
-          <div class="muted tickFormula">TICK = uptick symbols − downtick symbols (from HOD/LOD or Local H/L alerts)</div>
-        </div>
-        <div class="tickReadout">
-          <span id="tickModeBadge" class="tickModeBadge">Session HOD/LOD</span>
-          <span id="tickValue" class="tickValue neutral">0</span>
-        </div>
-      </div>
-      <div id="tickChart" class="tickChart" aria-label="Synthetic TICK chart"></div>
-      <div class="tickScaleHint">
-        <span class="tickLegendPos">Buy pressure</span>
-        <span class="tickLegendZero">0 = balanced</span>
-        <span class="tickLegendNeg">Sell pressure</span>
-      </div>
-    </section>
     <!-- ===== Split layout: LEFT (history you can scroll/pin) • RIGHT (live stream) ===== -->
     <section class="split">
       <!-- LEFT: pinned + historical feed (scrollable), max 50% width -->
@@ -163,6 +145,24 @@
 
       <!-- RIGHT: tabbed panel (Live Alerts / RVOL table) -->
       <div class="col rightCol">
+        <section id="tickPanel" class="panel tickPanel" aria-label="Synthetic TICK breadth">
+          <div class="tickTop">
+            <div>
+              <div class="title">Synthetic TICK Breadth</div>
+              <div class="muted tickFormula">TICK = uptick symbols − downtick symbols (from HOD/LOD or Local H/L alerts)</div>
+            </div>
+            <div class="tickReadout">
+              <span id="tickModeBadge" class="tickModeBadge">Session HOD/LOD</span>
+              <span id="tickValue" class="tickValue neutral">0</span>
+            </div>
+          </div>
+          <div id="tickChart" class="tickChart" aria-label="Synthetic TICK chart"></div>
+          <div class="tickScaleHint">
+            <span class="tickLegendPos">Buy pressure</span>
+            <span class="tickLegendZero">0 = balanced</span>
+            <span class="tickLegendNeg">Sell pressure</span>
+          </div>
+        </section>
         <section class="panel rightTabs" aria-label="Right panel tabs">
           <div class="tabHeader">
             <div class="tabRow" role="tablist" aria-label="Alert views">

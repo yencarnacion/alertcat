@@ -41,7 +41,6 @@ const bucketSize = document.getElementById("bucketSize");
 const alertsTableBody = document.querySelector("#alertsTable tbody");
 const alertsCount = document.getElementById("alertsCount");
 // Synthetic TICK panel
-const tickPanel = document.getElementById("tickPanel");
 const tickChartEl = document.getElementById("tickChart");
 const tickValueEl = document.getElementById("tickValue");
 const tickModeBadge = document.getElementById("tickModeBadge");
@@ -70,6 +69,7 @@ let sessionDateET = ""; // YYYY-MM-DD (from /api/status)
 const TICK_HISTORY_LIMIT = 2400;
 const tickDirsBySymbol = new Map(); // sym -> -1 | 1
 let tickSeries = null;
+let tickLineSeries = null;
 let tickChart = null;
 let tickRO = null;
 let tickData = []; // [{time, value, color}]
@@ -465,23 +465,12 @@ function updateTickReadout(value) {
   tickValueEl.classList.remove("positive", "negative", "neutral");
   tickValueEl.classList.add(v > 0 ? "positive" : (v < 0 ? "negative" : "neutral"));
 }
-function syncSplitViewportBudget() {
-  const panelH = tickPanel ? Math.ceil(tickPanel.getBoundingClientRect().height) : 320;
-  const offset = Math.max(260, panelH + 20);
-  document.documentElement.style.setProperty("--tick-stack-offset", `${offset}px`);
-}
 function ensureTickChart() {
-  if (!tickChartEl || tickChart) {
-    syncSplitViewportBudget();
-    return;
-  }
+  if (!tickChartEl || tickChart) return;
   const LWC = (typeof window !== "undefined") ? window.LightweightCharts : null;
-  if (!LWC || typeof LWC.createChart !== "function") {
-    syncSplitViewportBudget();
-    return;
-  }
+  if (!LWC || typeof LWC.createChart !== "function") return;
   const width = tickChartEl.clientWidth || 320;
-  const height = tickChartEl.clientHeight || 220;
+  const height = tickChartEl.clientHeight || 165;
   tickChart = LWC.createChart(tickChartEl, {
     width,
     height,
@@ -511,8 +500,20 @@ function ensureTickChart() {
     priceLineVisible: false,
     priceFormat: { type: "price", precision: 0, minMove: 1 },
   });
-  if (tickSeries && typeof tickSeries.createPriceLine === "function") {
-    tickSeries.createPriceLine({
+  tickLineSeries = tickChart.addLineSeries({
+    color: "#dbe6ff",
+    lineWidth: 2,
+    lineStyle: 0,
+    lastValueVisible: false,
+    priceLineVisible: false,
+    crosshairMarkerVisible: true,
+    crosshairMarkerRadius: 2,
+    crosshairMarkerBorderColor: "#dbe6ff",
+    crosshairMarkerBackgroundColor: "#0f131d",
+    priceFormat: { type: "price", precision: 0, minMove: 1 },
+  });
+  if (tickLineSeries && typeof tickLineSeries.createPriceLine === "function") {
+    tickLineSeries.createPriceLine({
       price: 0,
       color: "#b9c4dd",
       lineWidth: 1,
@@ -530,18 +531,18 @@ function ensureTickChart() {
       if (!tickChart || !tickChartEl) return;
       tickChart.applyOptions({
         width: tickChartEl.clientWidth || 320,
-        height: tickChartEl.clientHeight || 220,
+        height: tickChartEl.clientHeight || 165,
       });
-      syncSplitViewportBudget();
     });
     tickRO.observe(tickChartEl);
   }
-  syncSplitViewportBudget();
 }
 function updateTickScaleBounds() {
   if (!tickChart) return;
-  const maxAbs = tickData.reduce((mx, p) => Math.max(mx, Math.abs(Number(p.value) || 0)), 0);
-  const bound = Math.max(4, maxAbs + Math.max(2, Math.ceil(maxAbs * 0.2)));
+  const recent = tickData.slice(-240);
+  const recentMaxAbs = recent.reduce((mx, p) => Math.max(mx, Math.abs(Number(p.value) || 0)), 0);
+  const maxAbs = Math.max(recentMaxAbs, Math.abs(Number(tickCurrentValue) || 0));
+  const bound = Math.max(16, maxAbs + Math.max(4, Math.ceil(maxAbs * 0.25)));
   try {
     tickChart.priceScale("right").setVisibleRange({ from: -bound, to: bound });
   } catch {}
@@ -550,6 +551,9 @@ function drawTickSeries(fit = false) {
   ensureTickChart();
   if (!tickSeries) return;
   tickSeries.setData(tickData);
+  if (tickLineSeries) {
+    tickLineSeries.setData(tickData.map(p => ({ time: p.time, value: p.value })));
+  }
   updateTickScaleBounds();
   if (tickChart) {
     if (fit) tickChart.timeScale().fitContent();
@@ -558,7 +562,11 @@ function drawTickSeries(fit = false) {
 }
 function resetTickChart() {
   tickDirsBySymbol.clear();
-  tickData = [];
+  const now = Math.floor(Date.now() / 1000);
+  tickData = [
+    { time: Math.max(1, now - 1), value: 0, color: tickColor(0) },
+    { time: Math.max(1, now), value: 0, color: tickColor(0) },
+  ];
   tickCurrentValue = 0;
   updateTickReadout(0);
   drawTickSeries(true);
@@ -618,7 +626,18 @@ function rebuildTickFromAlerts(alerts) {
     ingestTickAlert(a, false);
   }
   if (tickData.length === 0) {
-    appendTickPoint({ time: Math.floor(Date.now() / 1000), value: 0 }, false);
+    const now = Math.floor(Date.now() / 1000);
+    tickData = [
+      { time: Math.max(1, now - 1), value: 0, color: tickColor(0) },
+      { time: Math.max(1, now), value: 0, color: tickColor(0) },
+    ];
+  } else if (tickData.length === 1) {
+    const first = tickData[0];
+    tickData.unshift({
+      time: Math.max(1, Number(first.time || 1) - 1),
+      value: 0,
+      color: tickColor(0),
+    });
   }
   drawTickSeries(true);
 }
@@ -884,7 +903,6 @@ function trimLive() {
 }
 function recomputeLiveCapacity() {
   if (!liveFeed) return;
-  syncSplitViewportBudget();
   if (liveWrap && liveWrap.hasAttribute("hidden")) return;
   // Make sure the container has a precise height that fits the viewport.
   const boxTop = liveFeed.getBoundingClientRect().top;
@@ -1505,7 +1523,6 @@ function setCompact(on){
   try { localStorage.setItem('alertcat.compact', on ? '1' : '0'); } catch {}
   chartsLimit = on ? 2 : 5; // fewer auto-charts in compact mode
   renderAll(); // re-render to apply density + limits
-  syncSplitViewportBudget();
 }
 function initCompact(){
   let on = false;
