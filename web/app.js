@@ -105,6 +105,30 @@ const activeChartQueue = [];
 const chartLookbackMinDefault = 120;
 let chartLookbackMin = chartLookbackMinDefault;
 const chartRefreshMs = 15000;
+const miniBarsMaxConcurrent = 2;
+let miniBarsInFlight = 0;
+const miniBarsQueue = [];
+
+function drainMiniBarsQueue() {
+  while (miniBarsInFlight < miniBarsMaxConcurrent && miniBarsQueue.length > 0) {
+    const item = miniBarsQueue.shift();
+    miniBarsInFlight += 1;
+    Promise.resolve()
+      .then(item.task)
+      .then(item.resolve, item.reject)
+      .finally(() => {
+        miniBarsInFlight = Math.max(0, miniBarsInFlight - 1);
+        drainMiniBarsQueue();
+      });
+  }
+}
+
+function runMiniBarsTask(task) {
+  return new Promise((resolve, reject) => {
+    miniBarsQueue.push({ task, resolve, reject });
+    drainMiniBarsQueue();
+  });
+}
 const RIGHT_TAB_STORAGE_KEY = "alertcat.right_tab";
 const ESSENTIALS_STORAGE_KEY = "alertcat.essentials";
 // --- Pinning (persisted in this browser) ---
@@ -1025,7 +1049,7 @@ function addIncomingAlert(a){
   const isScalp = typeof a.kind === "string" && a.kind.startsWith("scalp_");
   const visible = shouldShow(a.kind) && !isPinnedId(alertId(a));
   if (visible) {
-    const autoChart = true;
+    const autoChart = chartsById.size < chartsLimit;
     const node = buildAlertCard(a, autoChart, false);
     feed.appendChild(node);
 
@@ -1218,6 +1242,7 @@ function destroyChart(id) {
   if (idx >= 0) activeChartQueue.splice(idx, 1);
   const rec = chartsById.get(id);
   if (!rec) return;
+  try { if (typeof rec.stop === 'function') rec.stop(); } catch {}
   try { if (rec.timer) clearInterval(rec.timer); } catch {}
   try { if (rec.ro) rec.ro.disconnect(); } catch {}
   try { rec.chart.remove(); } catch {}
@@ -1268,33 +1293,55 @@ async function spawnChart(id, sym) {
     setStatus('Chart API mismatch', false);
     return false;
   }
+  let destroyed = false;
+  let fetchInProgress = false;
+  let pendingAtMs = null;
+  let barsAbortCtl = null;
   async function loadBars(atMs) {
-    const lookback = chartLookbackMin || 120;
-    const url = `/api/bars?symbol=${encodeURIComponent(sym)}&at=${encodeURIComponent(atMs)}&mins=${encodeURIComponent(lookback)}`;
-    try {
-      const res = await fetch(url, { cache: 'no-store' });
-      const j = await res.json();
-      if (Array.isArray(j?.bars)) {
-        const data = j.bars.map(b => ({
-          time: Number(b.time), // epoch seconds expected
-          open: Number(b.open),
-          high: Number(b.high),
-          low: Number(b.low),
-          close: Number(b.close),
-        }));
-        series.setData(data);
-        chart.timeScale().fitContent();
-      } else {
-        if (j && j.ok === false) {
-          console.warn('[mini-chart]', 'bars fetch failed for', sym, j);
+    if (destroyed) return;
+    pendingAtMs = atMs;
+    if (fetchInProgress) return;
+    fetchInProgress = true;
+    while (!destroyed && pendingAtMs != null) {
+      const scheduledAtMs = pendingAtMs;
+      pendingAtMs = null;
+      const lookback = chartLookbackMin || 120;
+      const url = `/api/bars?symbol=${encodeURIComponent(sym)}&at=${encodeURIComponent(scheduledAtMs)}&mins=${encodeURIComponent(lookback)}`;
+      const ctl = new AbortController();
+      barsAbortCtl = ctl;
+      try {
+        await runMiniBarsTask(async () => {
+          if (destroyed || ctl.signal.aborted) return;
+          const res = await fetch(url, { cache: 'no-store', signal: ctl.signal });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const j = await res.json();
+          if (destroyed || ctl.signal.aborted) return;
+          if (Array.isArray(j?.bars)) {
+            const data = j.bars.map(b => ({
+              time: Number(b.time), // epoch seconds expected
+              open: Number(b.open),
+              high: Number(b.high),
+              low: Number(b.low),
+              close: Number(b.close),
+            }));
+            series.setData(data);
+            chart.timeScale().fitContent();
+          } else if (j && j.ok === false) {
+            console.warn('[mini-chart]', 'bars fetch failed for', sym, j);
+          }
+        });
+      } catch (e) {
+        if (!(e && e.name === 'AbortError')) {
+          console.error('[mini-chart] fetch bars failed', sym, e);
         }
+      } finally {
+        if (barsAbortCtl === ctl) barsAbortCtl = null;
       }
-    } catch (e) {
-      console.error('[mini-chart] fetch bars failed', sym, e);
     }
+    fetchInProgress = false;
   }
   await loadBars(Date.now());
-  const timer = setInterval(() => loadBars(Date.now()), chartRefreshMs);
+  const timer = setInterval(() => { loadBars(Date.now()); }, chartRefreshMs);
   let ro;
   if (typeof ResizeObserver === 'function') {
     ro = new ResizeObserver(() => {
@@ -1304,7 +1351,14 @@ async function spawnChart(id, sym) {
     });
     ro.observe(box);
   }
-  chartsById.set(id, { chart, series, container: box, timer, ro });
+  chartsById.set(id, {
+    chart, series, container: box, timer, ro,
+    stop: () => {
+      destroyed = true;
+      pendingAtMs = null;
+      if (barsAbortCtl) barsAbortCtl.abort();
+    }
+  });
   return true;
 }
 // ----------------- News + SEC -----------------
